@@ -1,0 +1,54 @@
+<div class="cmd cmd-widget #history#" data-type="info" data-subtype="string" data-template="hygeabe" data-cmd_id="#id#" data-cmd_uid="#uid#" data-version="#version#" data-eqLogic_id="#eqLogic_id#">
+  <div class="title #hide_name#">
+    <div class="cmdName">#name_display#</div>
+  </div>
+  <div class="content">
+    <div class="hygeabeDate" style="font-size:1.5em;font-weight:bold;line-height:1.3;"></div>
+    <div class="hygeabeFractions" style="margin-top:4px;"></div>
+  </div>
+  <div class="timeCmd label label-default #history#" data-type="info"></div>
+  <template>
+    <div>time : duration|date ({{Affiche durée ou date de la valeur}})</div>
+  </template>
+  <script>
+    jeedom.cmd.addUpdateFunction('#id#', function (_options) {
+      var cmd = document.querySelector('.cmd[data-cmd_uid="#uid#"]')
+      if (!is_object(cmd)) { return }
+
+      /* La commande transporte la date et les déchets du jour dans un même
+         objet : les afficher séparément demanderait deux commandes et deux
+         rafraîchissements qui pourraient se croiser. */
+      var payload = { label: '', fractions: [] }
+      try {
+        payload = JSON.parse(_options.value)
+      } catch (error) {
+        payload = { label: _options.value, fractions: [] }
+      }
+      if (!isset(payload.fractions)) { payload.fractions = [] }
+
+      cmd.querySelector('.hygeabeDate').textContent = init(payload.label)
+
+      var container = cmd.querySelector('.hygeabeFractions')
+      container.innerHTML = ''
+      for (var i = 0; i < payload.fractions.length; i++) {
+        /* textContent et non innerHTML : les libellés viennent d'un service
+           extérieur et ne doivent jamais être interprétés comme du HTML. */
+        var badge = document.createElement('span')
+        badge.className = 'label'
+        badge.style.display = 'inline-block'
+        badge.style.margin = '2px 4px 2px 0'
+        badge.style.fontSize = '0.95em'
+        badge.style.backgroundColor = init(payload.fractions[i].color, '#777777')
+        badge.style.color = init(payload.fractions[i].text, '#FFFFFF')
+        badge.textContent = init(payload.fractions[i].name)
+        container.appendChild(badge)
+      }
+
+      if ('#time#' == 'duration' || '#time#' == 'date') {
+        jeedom.cmd.displayDuration(_options.valueDate, cmd.querySelector('.timeCmd'), '#time#')
+      }
+    })
+
+    jeedom.cmd.refreshValue([{ cmd_id: '#id#', value: '#value#', display_value: '', valueDate: '#valueDate#', collectDate: '#collectDate#', alertLevel: '#alertLevel#', unit: '' }])
+  </script>
+</div>

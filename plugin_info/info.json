@@ -1,0 +1,32 @@
+{
+    "id": "hygeabe",
+    "name": "Hygea",
+    "pluginVersion": "0.1",
+    "description": {
+        "fr_FR": "Calendrier des collectes de déchets Hygea et des autres intercommunales belges publiant sur Recycle! (recycleapp.be). Renseignez code postal, rue et numéro : le plugin interroge l'API, affiche la prochaine collecte avec les fractions concernées (déchets organiques, PMC, papiers-cartons, déchets résiduels, encombrants) et fournit des commandes info exploitables en scénario pour être prévenu la veille de sortir les bonnes poubelles.",
+        "en_US": "Waste collection calendar for Hygea and the other Belgian operators publishing on Recycle! (recycleapp.be). Enter postal code, street and house number: the plugin queries the API, shows the next collection with its fractions (organic waste, PMD, paper and cardboard, residual waste, bulky items) and exposes info commands usable in scenarios to be reminded the evening before to take the right bins out."
+    },
+    "licence": "AGPL",
+    "author": "sMug (Jérôme Fafchamps)",
+    "require": "4.4",
+    "requireOsVersion": "11",
+    "category": "organization",
+    "index": "hygeabe",
+    "hasDependency": 0,
+    "hasOwnDeamon": 0,
+    "maxDependancyInstallTime": 5,
+    "eventjs": 0,
+    "issue": "https://github.com/replicatorbe/jeedom-plugin-hygeabe/issues",
+    "documentation": "https://github.com/replicatorbe/jeedom-plugin-hygeabe/blob/master/docs/#language#/index.md",
+    "changelog": "https://github.com/replicatorbe/jeedom-plugin-hygeabe/blob/master/docs/#language#/changelog.md",
+    "language": [
+        "fr_FR",
+        "en_US"
+    ],
+    "compatibility": [
+        "smart",
+        "rpi",
+        "docker",
+        "diy"
+    ]
+}
