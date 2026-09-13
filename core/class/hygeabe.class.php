@@ -676,16 +676,16 @@ class hygeabe extends eqLogic {
         }
 
         if ($next === null) {
-            $this->setCmd('next', json_encode(array('label' => __('Aucune collecte connue', __FILE__), 'fractions' => array())));
-            $this->setCmd('summary', __('Aucune collecte connue', __FILE__));
-            $this->setCmd('next_date', '');
-            $this->setCmd('next_fractions', '');
+            $this->publishCmd('next', json_encode(array('label' => __('Aucune collecte connue', __FILE__), 'fractions' => array())));
+            $this->publishCmd('summary', __('Aucune collecte connue', __FILE__));
+            $this->publishCmd('next_date', '');
+            $this->publishCmd('next_fractions', '');
             /*
              * -1 et non la chaîne vide : le coeur convertit une valeur vide en 0
              * sur une commande numérique, c'est-à-dire exactement « collecte
              * aujourd'hui ». Un scénario se déclencherait tous les jours.
              */
-            $this->setCmd('next_days', self::UNKNOWN_DAYS);
+            $this->publishCmd('next_days', self::UNKNOWN_DAYS);
         } else {
             $names = array();
             $badges = array();
@@ -705,22 +705,22 @@ class hygeabe extends eqLogic {
              * plugin ne sait pas traduire ses {{…}}, le coeur les cherche dans son
              * propre catalogue (cmd::toHtml). Le texte doit donc venir d'ici.
              */
-            $this->setCmd('next', json_encode(array(
+            $this->publishCmd('next', json_encode(array(
                 'label'     => $label,
                 'days'      => $next['days'],
                 'countdown' => self::countdownLabel($next['days']),
                 'fractions' => $badges,
             )));
-            $this->setCmd('summary', $label . ' : ' . implode(', ', $names));
-            $this->setCmd('next_date', $next['date']);
-            $this->setCmd('next_fractions', implode(', ', $names));
-            $this->setCmd('next_days', $next['days']);
+            $this->publishCmd('summary', $label . ' : ' . implode(', ', $names));
+            $this->publishCmd('next_date', $next['date']);
+            $this->publishCmd('next_fractions', implode(', ', $names));
+            $this->publishCmd('next_days', $next['days']);
         }
 
-        $this->setCmd('today', ($today_collection !== null) ? 1 : 0);
-        $this->setCmd('tomorrow', ($tomorrow !== null) ? 1 : 0);
-        $this->setCmd('tomorrow_fractions', ($tomorrow === null) ? '' : implode(', ', array_column($tomorrow['fractions'], 'name')));
-        $this->setCmd('operator', isset($_calendar['operator']) ? $_calendar['operator'] : '');
+        $this->publishCmd('today', ($today_collection !== null) ? 1 : 0);
+        $this->publishCmd('tomorrow', ($tomorrow !== null) ? 1 : 0);
+        $this->publishCmd('tomorrow_fractions', ($tomorrow === null) ? '' : implode(', ', array_column($tomorrow['fractions'], 'name')));
+        $this->publishCmd('operator', isset($_calendar['operator']) ? $_calendar['operator'] : '');
 
         $this->refreshFractionCommands($collections, $today, $passed, isset($_calendar['fractions']) ? $_calendar['fractions'] : array());
     }
@@ -757,9 +757,9 @@ class hygeabe extends eqLogic {
                 $days = $remaining;
                 break;
             }
-            $this->setCmd('fraction::' . $slug . '::date', $date);
-            $this->setCmd('fraction::' . $slug . '::days', $days);
-            $this->setCmd('fraction::' . $slug . '::tomorrow', ($days === 1) ? 1 : 0);
+            $this->publishCmd('fraction::' . $slug . '::date', $date);
+            $this->publishCmd('fraction::' . $slug . '::days', $days);
+            $this->publishCmd('fraction::' . $slug . '::tomorrow', ($days === 1) ? 1 : 0);
         }
     }
 
@@ -772,7 +772,16 @@ class hygeabe extends eqLogic {
      * heures et déclencherait vingt-quatre fois par jour le scénario qui
      * l'écoute.
      */
-    private function setCmd($_logicalId, $_value) {
+    /*
+     * Surtout pas nommée setCmd() : en enregistrant un équipement, le coeur
+     * passe le formulaire à utils::a2o(), qui transforme chaque clé reçue en un
+     * appel « set » + clé (utils.class.php, vers la ligne 117). La page envoie
+     * une clé « cmd » portant les lignes du tableau des commandes : le coeur
+     * appelle donc setCmd() sur la classe du plugin, et une méthode privée de ce
+     * nom fait mourir l'enregistrement sur une erreur fatale, avant que rien ne
+     * soit écrit.
+     */
+    private function publishCmd($_logicalId, $_value) {
         if ($_value === '') {
             $cmd = $this->getCmd(null, $_logicalId);
             if (is_object($cmd) && $cmd->execCmd() === '') {
