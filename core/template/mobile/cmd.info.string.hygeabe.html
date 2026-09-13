@@ -1,56 +1,120 @@
-<div class="cmd cmd-widget #history#" data-type="info" data-subtype="string" data-template="hygeabe" data-cmd_id="#id#" data-cmd_uid="#uid#" data-version="#version#" data-eqLogic_id="#eqLogic_id#">
+<div class="cmd cmd-widget #history#" data-type="info" data-subtype="string" data-template="hygeabe" data-urgency="" data-cmd_id="#id#" data-cmd_uid="#uid#" data-version="#version#" data-eqLogic_id="#eqLogic_id#">
   <div class="title #hide_name#">
     <div class="cmdName">#name_display#</div>
   </div>
   <div class="content">
-    <div class="hygeabeDate" style="font-size:1.5em;font-weight:bold;line-height:1.3;"></div>
-    <div class="hygeabeFractions" style="margin-top:4px;"></div>
+    <div class="hygeabeDate"></div>
+    <div class="hygeabeWhen"></div>
+    <div class="hygeabeFractions"></div>
   </div>
   <div class="timeCmd label label-default #history#" data-type="info"></div>
   <template>
     <div>time : duration|date ({{Affiche durée ou date de la valeur}})</div>
+    <div>icons : 1 ({{Ajoute le pictogramme du déchet dans chaque étiquette}})</div>
   </template>
   <script>
-    jeedom.cmd.addUpdateFunction('#id#', function (_options) {
-      var cmd = document.querySelector('.cmd[data-cmd_uid="#uid#"]')
-      if (!is_object(cmd)) { return }
-
-      /* La commande transporte la date et les déchets du jour dans un même
-         objet : les afficher séparément demanderait deux commandes et deux
-         rafraîchissements qui pourraient se croiser. */
-      var payload = { label: '', fractions: [] }
-      try {
-        payload = JSON.parse(_options.value)
-      } catch (error) {
-        /* Commande jamais rafraîchie, ou valeur qui n'est pas du JSON : afficher
-           le texte brut plutôt qu'une tuile vide réduite à son titre. */
-        payload = { label: _options.value, fractions: [] }
-      }
-      if (!isset(payload.fractions)) { payload.fractions = [] }
-
-      cmd.querySelector('.hygeabeDate').textContent = init(payload.label) || '-'
-
-      var container = cmd.querySelector('.hygeabeFractions')
-      container.innerHTML = ''
-      for (var i = 0; i < payload.fractions.length; i++) {
-        /* textContent et non innerHTML : les libellés viennent d'un service
-           extérieur et ne doivent jamais être interprétés comme du HTML. */
-        var badge = document.createElement('span')
-        badge.className = 'label'
-        badge.style.display = 'inline-block'
-        badge.style.margin = '2px 4px 2px 0'
-        badge.style.fontSize = '0.95em'
-        badge.style.backgroundColor = init(payload.fractions[i].color, '#777777')
-        badge.style.color = init(payload.fractions[i].text, '#FFFFFF')
-        badge.textContent = init(payload.fractions[i].name)
-        container.appendChild(badge)
+    (function () {
+      /* Une seule feuille de style pour toutes les tuiles du plugin, posée au
+         premier rendu. Le CSS d'un plugin n'est pas chargé sur le dashboard, et
+         les règles .content du coeur n'existent pas côté mobile : le gabarit doit
+         se suffire à lui-même. Aucune couleur en dur, tout vient du thème. */
+      if (!document.getElementById('hygeabeWidgetCss')) {
+        var css = document.createElement('style')
+        css.id = 'hygeabeWidgetCss'
+        css.textContent = [
+          '.cmd-widget[data-template="hygeabe"]{display:flex;flex-direction:column;align-items:center;width:100%}',
+          '.cmd-widget[data-template="hygeabe"] .cmdName{font-size:12px;line-height:16px;font-weight:400;color:var(--txt-color)}',
+          '.cmd-widget[data-template="hygeabe"] .content{display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;padding:0 4px 2px;gap:3px}',
+          '.cmd-widget[data-template="hygeabe"] .hygeabeDate{font-size:1.5em;font-weight:700;line-height:1.15;text-align:center;color:var(--txt-color)}',
+          '.cmd-widget[data-template="hygeabe"] .hygeabeDate:first-letter{text-transform:uppercase}',
+          '.cmd-widget[data-template="hygeabe"][data-urgency="today"] .hygeabeDate{color:var(--al-danger-color)}',
+          '.cmd-widget[data-template="hygeabe"][data-urgency="tomorrow"] .hygeabeDate{color:var(--al-warning-color)}',
+          '.cmd-widget[data-template="hygeabe"] .hygeabeWhen{font-size:.82em;font-weight:400;color:var(--txt-color);opacity:.85;line-height:1.3}',
+          '.cmd-widget[data-template="hygeabe"] .hygeabeWhen.label{opacity:1;padding:2px 6px;font-weight:600;border-radius:var(--border-radius)}',
+          '.cmd-widget[data-template="hygeabe"] .hygeabeFractions{display:flex;flex-wrap:wrap;justify-content:center;gap:3px;width:100%;margin-top:2px}',
+          '.cmd-widget[data-template="hygeabe"] .hygeabeChip{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:2px 6px;font-size:.85em;font-weight:600;line-height:1.35;text-align:left;white-space:normal;overflow-wrap:anywhere;border-radius:var(--border-radius);background:var(--btnEq-default-color);color:var(--txt-color)}',
+          '.cmd-widget[data-template="hygeabe"] .hygeabeChip > i{font-size:1em;flex:0 0 auto}'
+        ].join('')
+        document.head.appendChild(css)
       }
 
-      if ('#time#' == 'duration' || '#time#' == 'date') {
-        jeedom.cmd.displayDuration(_options.valueDate, cmd.querySelector('.timeCmd'), '#time#')
+      /* Une couleur de texte lisible sur le fond de l'étiquette quand le service
+         n'en fournit pas : sans ce calcul, un fond jaune reçoit du blanc. */
+      function hygeabeReadableOn(_background, _given) {
+        if (typeof _given === 'string' && /^#[0-9a-f]{3,8}$/i.test(_given)) { return _given }
+        var found = /^#([0-9a-f]{6})$/i.exec(String(_background || ''))
+        if (!found) { return '' }
+        var value = parseInt(found[1], 16)
+        var luminance = 0.2126 * ((value >> 16) & 255) + 0.7152 * ((value >> 8) & 255) + 0.0722 * (value & 255)
+        return (luminance > 150) ? '#1E1E1E' : '#FFFFFF'
       }
-    })
 
-    jeedom.cmd.refreshValue([{ cmd_id: '#id#', value: '#value#', display_value: '', valueDate: '#valueDate#', collectDate: '#collectDate#', alertLevel: '#alertLevel#', unit: '' }])
+      var hygeabeWithIcons = (domUtils.issetWidgetOptParam('#icons#', 'icons') && '#icons#' != '0')
+
+      jeedom.cmd.addUpdateFunction('#id#', function (_options) {
+        var cmd = document.querySelector('.cmd[data-cmd_uid="#uid#"]')
+        if (!is_object(cmd)) { return }
+
+        /* La commande transporte la date et les déchets dans un même objet :
+           deux commandes distinctes demanderaient deux rafraîchissements qui
+           pourraient se croiser. */
+        var payload = null
+        try { payload = JSON.parse(_options.value) } catch (error) { payload = null }
+        if (payload === null || typeof payload !== 'object') {
+          /* Commande jamais rafraîchie, ou valeur qui n'est pas du JSON :
+             afficher le texte brut plutôt qu'une tuile vide. */
+          payload = { label: init(_options.value), fractions: [] }
+        }
+        if (!Array.isArray(payload.fractions)) { payload.fractions = [] }
+
+        cmd.querySelector('.hygeabeDate').textContent = init(payload.label) || '-'
+
+        /* Le nombre de jours et sa formulation viennent du PHP : lui seul sait
+           traduire, et le cron horaire les remet à jour au passage de minuit. */
+        var days = (typeof payload.days === 'number') ? payload.days : null
+        cmd.setAttribute('data-urgency', (days === 0) ? 'today' : ((days === 1) ? 'tomorrow' : ''))
+
+        var when = cmd.querySelector('.hygeabeWhen')
+        when.textContent = init(payload.countdown)
+        when.className = 'hygeabeWhen'
+        if (days === 0) { when.className += ' label label-danger' }
+        else if (days === 1) { when.className += ' label label-warning' }
+        when.style.display = (when.textContent === '') ? 'none' : ''
+
+        var box = cmd.querySelector('.hygeabeFractions')
+        box.textContent = ''
+        for (var i = 0; i < payload.fractions.length; i++) {
+          var fraction = payload.fractions[i]
+          var chip = document.createElement('span')
+          chip.className = 'hygeabeChip'
+          /* Une couleur invalide est refusée par le CSSOM : l'étiquette garde
+             alors le fond neutre de la feuille de style. */
+          chip.style.backgroundColor = init(fraction.color)
+          chip.style.color = hygeabeReadableOn(fraction.color, fraction.text)
+          if (hygeabeWithIcons && typeof fraction.icon === 'string') {
+            var icon = document.createElement('i')
+            /* La classe vient du plugin, mais elle a transité par la base : la
+               filtrer coûte une ligne. */
+            icon.className = fraction.icon.replace(/[^a-zA-Z0-9 -]/g, '')
+            chip.appendChild(icon)
+          }
+          var label = document.createElement('span')
+          /* textContent et non innerHTML : les libellés viennent d'un service
+             extérieur et ne doivent jamais être interprétés comme du HTML. */
+          label.textContent = init(fraction.name)
+          chip.appendChild(label)
+          box.appendChild(chip)
+        }
+
+        if ('#time#' == 'duration' || '#time#' == 'date') {
+          jeedom.cmd.displayDuration(_options.valueDate, cmd.querySelector('.timeCmd'), '#time#')
+        }
+      })
+
+      /* display_value reste vide : le coeur n'échappe que les apostrophes dans
+         #state#, alors que #value# passe par addslashes et traverse sans dommage
+         un littéral JavaScript. */
+      jeedom.cmd.refreshValue([{ cmd_id: '#id#', value: '#value#', display_value: '', valueDate: '#valueDate#', collectDate: '#collectDate#', alertLevel: '#alertLevel#', unit: '' }])
+    })()
   </script>
 </div>

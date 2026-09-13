@@ -75,14 +75,29 @@ Avec l'option « commandes par fraction », chaque type de déchet ajoute :
 | `<Déchet> : jours restants` | info / numeric |
 | `<Déchet> : demain` | info / binary |
 
-## Le widget
+## Sur le dashboard
 
-La commande « Prochaine collecte » utilise un widget fourni par le plugin : il
-affiche la date en gros et une étiquette par type de déchet, reprenant les
-couleurs officielles du service.
+Une seule commande est visible par défaut : **Prochaine collecte**. Toutes les
+autres existent pour les scénarios et les graphiques, et resteraient sans cela
+empilées dans une tuile de quelques centimètres — jusqu'à vingt widgets pour une
+adresse desservie en verre, textiles et encombrants.
 
-Si vous préférez l'affichage standard, masquez cette commande et rendez
-« Résumé » visible à la place.
+La tuile affiche la date en gros, une phrase de rappel, et une étiquette par
+type de déchet aux couleurs officielles du service. Elle change d'aspect quand
+l'information compte : la date passe en orange la veille, en rouge le jour même,
+et le rappel devient une étiquette « à sortir ce soir ».
+
+Deux réglages, dans la configuration de la commande, onglet Affichage, bloc
+« Paramètres optionnels widget » :
+
+| Paramètre | Valeur | Effet |
+|---|---|---|
+| `icons` | `1` | ajoute le pictogramme du déchet dans chaque étiquette |
+| `time` | `duration` ou `date` | affiche l'ancienneté de la valeur sous la tuile |
+
+Pour afficher une autre commande, rendez-la visible depuis l'onglet Commandes.
+Les commandes binaires utilisent un widget du plugin qui montre une poubelle
+orange quand c'est vrai, un tiret discret sinon.
 
 ## Utilisation dans un scénario
 

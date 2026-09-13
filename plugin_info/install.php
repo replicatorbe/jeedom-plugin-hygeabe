@@ -21,6 +21,58 @@ function hygeabe_install() {
 }
 
 function hygeabe_update() {
+    hygeabe_migrateDisplay();
+}
+
+/*
+ * Remet l'affichage des équipements existants dans l'état que le plugin pose
+ * désormais à la création : seule la tuile « Prochaine collecte » visible, les
+ * commandes binaires habillées, la tuile assez large pour quatre étiquettes de
+ * déchets. Quatorze widgets empilés dans 230 pixels rendaient l'équipement
+ * illisible sur le dashboard.
+ *
+ * Une seule fois : ce que l'utilisateur réaffiche ou redimensionne ensuite lui
+ * appartient.
+ */
+function hygeabe_migrateDisplay() {
+    if (config::byKey('migration::display', 'hygeabe', 0) == 1) {
+        return;
+    }
+    foreach (eqLogic::byType('hygeabe') as $eqLogic) {
+        try {
+            if ($eqLogic->getDisplay('width') == '') {
+                $eqLogic->setDisplay('width', '280px');
+                $eqLogic->save(true);
+            }
+        } catch (Throwable $e) {
+            log::add('hygeabe', 'error', 'migration ' . $eqLogic->getHumanName() . ' : ' . $e->getMessage());
+        }
+
+        foreach ($eqLogic->getCmd() as $cmd) {
+            $logicalId = $cmd->getLogicalId();
+            if ($logicalId == 'next' || $logicalId == 'refresh') {
+                continue;
+            }
+            try {
+                $changed = false;
+                if ($cmd->getIsVisible() == 1) {
+                    $cmd->setIsVisible(0);
+                    $changed = true;
+                }
+                if ($cmd->getSubType() == 'binary' && strpos($cmd->getTemplate('dashboard'), 'hygeabe::') !== 0) {
+                    $cmd->setTemplate('dashboard', 'hygeabe::binLine');
+                    $cmd->setTemplate('mobile', 'hygeabe::binLine');
+                    $changed = true;
+                }
+                if ($changed) {
+                    $cmd->save();
+                }
+            } catch (Throwable $e) {
+                log::add('hygeabe', 'error', 'migration ' . $logicalId . ' : ' . $e->getMessage());
+            }
+        }
+    }
+    config::save('migration::display', 1, 'hygeabe');
 }
 
 function hygeabe_remove() {

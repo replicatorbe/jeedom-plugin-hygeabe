@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.2 — 13/09/2026
+
+**Dashboard**
+
+- Une seule commande est désormais visible : la tuile « Prochaine collecte ».
+  Les autres, destinées aux scénarios et aux graphiques, encombraient
+  l'équipement — jusqu'à vingt widgets empilés dans quelques centimètres.
+- La tuile change d'aspect à l'approche de la collecte : date en orange la
+  veille avec un rappel « à sortir ce soir », en rouge le jour même.
+- Un paramètre optionnel `icons` ajoute le pictogramme du déchet dans chaque
+  étiquette.
+- Les étiquettes se replient proprement sur plusieurs lignes, s'adaptent au
+  thème sombre, et la couleur du texte est calculée quand le service n'en
+  fournit pas : les papiers-cartons ne s'affichent plus en blanc sur jaune.
+
+**Rafraîchissement**
+
+- La commande d'action « Rafraîchir » ne force plus de lecture réseau : un
+  scénario qui l'appelait en boucle pouvait émettre des milliers d'appels par
+  jour au service.
+- Après un échec, le plugin attend trois heures avant de réessayer, au lieu de
+  solliciter chaque heure un service déjà en difficulté.
+- Une réponse sans aucune collecte ne remplace plus le calendrier connu : c'est
+  ce qui arrive quand l'intercommunale n'a pas encore publié l'année suivante.
+- Enregistrer un équipement ne relit le calendrier que si l'adresse a changé.
+- « Déchets à sortir ce soir », vide six jours sur sept, ne réveille plus les
+  scénarios qui l'écoutent à chaque heure.
+
 ## 0.1 — 13/09/2026
 
 Première version.

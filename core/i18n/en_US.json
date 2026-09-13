@@ -37,7 +37,10 @@
         "mercredi": "Wednesday",
         "jeudi": "Thursday",
         "vendredi": "Friday",
-        "samedi": "Saturday"
+        "samedi": "Saturday",
+        "à sortir ce soir": "to take out tonight",
+        "dans": "in",
+        "jours": "days"
     },
     "plugins/hygeabe/core/ajax/hygeabe.ajax.php": {
         "401 - Accès non autorisé": "401 - Access denied",

@@ -88,6 +88,27 @@ class hygeabe extends eqLogic {
      * répondre autre chose qu'un succès quand rien n'a été rafraîchi. */
     private $_refreshError = '';
 
+    /*
+     * Réutilise un gabarit du coeur en n'y changeant que les icônes. « Collecte
+     * demain » doit se lire comme un rappel, pas comme une coche verte quand
+     * c'est faux. Le coeur remplace les guillemets doubles par des apostrophes
+     * (cmd::getWidgetTemplateCode) : écrire directement en apostrophes.
+     */
+    public static function templateWidget() {
+        $icons = array(
+            '#_icon_on_#'  => "<i class='icon_orange fas fa-dumpster'></i>",
+            '#_icon_off_#' => "<i class='fas fa-minus'></i>",
+        );
+        return array(
+            'info' => array(
+                'binary' => array(
+                    'bin'     => array('template' => 'tmplicon',    'replace' => $icons),
+                    'binLine' => array('template' => 'tmpliconline', 'replace' => $icons),
+                ),
+            ),
+        );
+    }
+
     /* ==================================================================== CRON */
 
     /*
@@ -131,6 +152,12 @@ class hygeabe extends eqLogic {
         }
         $this->setConfiguration('street_id', trim((string) $this->getConfiguration('street_id')));
         $this->setConfiguration('zipcode_id', trim((string) $this->getConfiguration('zipcode_id')));
+
+        /* 230 px est la largeur par défaut du coeur : trop étroit pour quatre
+         * étiquettes de déchets. L'utilisateur reste libre de redimensionner. */
+        if ($this->getDisplay('width') == '') {
+            $this->setDisplay('width', '280px');
+        }
 
         /*
          * Aucune exception ici : le coeur crée l'équipement avec son seul nom,
@@ -246,20 +273,42 @@ class hygeabe extends eqLogic {
             'isVisible' => 0,
             'order'     => $order++,
         ));
-        $this->addCmdIfMissing('next_days', 'Jours avant la prochaine collecte', 'info', 'numeric', array(
+        /*
+         * Tout est masqué sauf la tuile : celle-ci dit déjà la date, l'urgence et
+         * les déchets concernés. Quatorze widgets empilés dans 230 px, c'est ce
+         * qui rendait le dashboard illisible, pas le dessin de la tuile. Les
+         * commandes restent disponibles pour les scénarios et les graphiques ;
+         * l'utilisateur en réaffiche une s'il la veut.
+         */
+        $days = $this->addCmdIfMissing('next_days', 'Jours avant la prochaine collecte', 'info', 'numeric', array(
+            'isVisible'    => 0,
             'isHistorized' => 1,
             'unite'        => 'j',
             'order'        => $order++,
         ));
+        /* Les seuils du coeur colorent le widget et remontent une pastille
+         * d'alerte sur la tuile, sans une ligne de gabarit. -1 veut dire
+         * « calendrier inconnu » : il reste en dehors, sinon une panne du
+         * service passerait pour une collecte du jour. */
+        if ($days->getAlert('warningif') == '' && $days->getAlert('dangerif') == '') {
+            $days->setAlert('warningif', '#value# == 1');
+            $days->setAlert('dangerif', '#value# == 0');
+            $days->save();
+        }
         $this->addCmdIfMissing('today', 'Collecte aujourd\'hui', 'info', 'binary', array(
-            'order' => $order++,
+            'isVisible' => 0,
+            'template'  => 'hygeabe::binLine',
+            'order'     => $order++,
         ));
         $this->addCmdIfMissing('tomorrow', 'Collecte demain', 'info', 'binary', array(
+            'isVisible'    => 0,
             'isHistorized' => 1,
+            'template'     => 'hygeabe::binLine',
             'order'        => $order++,
         ));
         $this->addCmdIfMissing('tomorrow_fractions', 'Déchets à sortir ce soir', 'info', 'string', array(
-            'order' => $order++,
+            'isVisible' => 0,
+            'order'     => $order++,
         ));
         $this->addCmdIfMissing('operator', 'Intercommunale', 'info', 'string', array(
             'isVisible' => 0,
@@ -280,14 +329,17 @@ class hygeabe extends eqLogic {
                 'icon'      => $fraction['icon'],
             ));
             $this->addCmdIfMissing('fraction::' . $slug . '::days', $fraction['name'] . ' : jours restants', 'info', 'numeric', array(
+                'isVisible'    => 0,
                 'isHistorized' => 1,
                 'unite'        => 'j',
                 'order'        => $order++,
                 'icon'         => $fraction['icon'],
             ));
             $this->addCmdIfMissing('fraction::' . $slug . '::tomorrow', $fraction['name'] . ' : demain', 'info', 'binary', array(
-                'order' => $order++,
-                'icon'  => $fraction['icon'],
+                'isVisible' => 0,
+                'template'  => 'hygeabe::binLine',
+                'order'     => $order++,
+                'icon'      => $fraction['icon'],
             ));
         }
     }
@@ -599,10 +651,26 @@ class hygeabe extends eqLogic {
             $badges = array();
             foreach ($next['fractions'] as $fraction) {
                 $names[] = $fraction['name'];
-                $badges[] = array('name' => $fraction['name'], 'color' => $fraction['color'], 'text' => $fraction['textColor']);
+                $badges[] = array(
+                    'name'  => $fraction['name'],
+                    'color' => $fraction['color'],
+                    'text'  => $fraction['textColor'],
+                    'icon'  => $fraction['icon'],
+                );
             }
             $label = self::humanDate($next['date'], $next['days']);
-            $this->setCmd('next', json_encode(array('label' => $label, 'fractions' => $badges)));
+            /*
+             * La tuile reçoit aussi le nombre de jours, pour changer d'aspect à
+             * l'approche de la collecte, et la phrase toute faite : un gabarit de
+             * plugin ne sait pas traduire ses {{…}}, le coeur les cherche dans son
+             * propre catalogue (cmd::toHtml). Le texte doit donc venir d'ici.
+             */
+            $this->setCmd('next', json_encode(array(
+                'label'     => $label,
+                'days'      => $next['days'],
+                'countdown' => self::countdownLabel($next['days']),
+                'fractions' => $badges,
+            )));
             $this->setCmd('summary', $label . ' : ' . implode(', ', $names));
             $this->setCmd('next_date', $next['date']);
             $this->setCmd('next_fractions', implode(', ', $names));
@@ -733,6 +801,17 @@ class hygeabe extends eqLogic {
             return __('demain', __FILE__);
         }
         return self::dateLabel($_date);
+    }
+
+    /* La phrase sous la date. Vide quand la date se suffit à elle-même. */
+    public static function countdownLabel($_days) {
+        if ($_days === 1) {
+            return __('à sortir ce soir', __FILE__);
+        }
+        if ($_days < 2) {
+            return '';
+        }
+        return __('dans', __FILE__) . ' ' . $_days . ' ' . __('jours', __FILE__);
     }
 
     /* Ramène une fraction du service à ce dont le plugin a besoin. */

@@ -74,14 +74,29 @@ With the "commands per waste type" option, each waste type adds:
 | `<Waste> : days left` | info / numeric |
 | `<Waste> : tomorrow` | info / binary |
 
-## The widget
+## On the dashboard
 
-The "Next collection" command uses a widget shipped with the plugin: it shows
-the date in large type and one label per waste type, using the official colours
-of the service.
+Only one command is visible by default: **Next collection**. All the others
+exist for scenarios and graphs, and would otherwise pile up in a tile a few
+centimetres wide — up to twenty widgets for an address served glass, textiles
+and bulky waste.
 
-If you prefer the standard display, hide that command and make "Summary" visible
-instead.
+The tile shows the date in large type, a reminder line, and one label per waste
+type in the official colours of the service. It changes look when it matters:
+the date turns orange the day before, red on the day itself, and the reminder
+becomes a "to take out tonight" label.
+
+Two settings, in the command configuration, Display tab, "Optional widget
+parameters" block:
+
+| Parameter | Value | Effect |
+|---|---|---|
+| `icons` | `1` | adds the waste pictogram inside each label |
+| `time` | `duration` or `date` | shows how old the value is, under the tile |
+
+To display another command, make it visible from the Commands tab. Binary
+commands use a plugin widget showing an orange bin when true, a discreet dash
+otherwise.
 
 ## Using it in a scenario
 
