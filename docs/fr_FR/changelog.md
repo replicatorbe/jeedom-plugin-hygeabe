@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3 — 13/09/2026
+
+**Correctif**
+
+- L'onglet Calendrier restait vide et « Dernier rafraîchissement » affichait
+  toujours un tiret : la garde qui écarte la réponse d'un équipement qu'on a
+  quitté entre-temps comparait un entier à une chaîne, et rejetait donc toutes
+  les réponses.
+- « Adresse retenue » n'était recalculée qu'au chargement de l'équipement, donc
+  restait vide pendant toute la saisie — au seul moment où on la regarde. Elle
+  suit maintenant la localité, la rue et le numéro au fur et à mesure.
+
 ## 0.2 — 13/09/2026
 
 **Dashboard**

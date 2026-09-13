@@ -80,11 +80,13 @@ function hygeabeCurrentId() {
   return input.value
 }
 
-/* Identifiant affiché, sans alerte : sert à écarter la réponse d'un équipement
-   qu'on a quitté entre-temps. */
-function hygeabeDisplayedId() {
+/* L'équipement affiché est-il toujours celui dont on attendait la réponse ?
+   Comparaison en chaînes des deux côtés : le coeur transmet l'identifiant en
+   entier dans printEqLogic, alors qu'un champ de formulaire rend toujours une
+   chaîne. Une comparaison stricte rejetait donc toutes les réponses. */
+function hygeabeIsDisplayed(_id) {
   var input = document.querySelector('.eqLogicAttr[data-l1key="id"]')
-  return (input === null) ? '' : input.value
+  return (input !== null && String(input.value) === String(_id))
 }
 
 /* Les actions serveur travaillent sur les valeurs en base : refuse de partir
@@ -115,6 +117,20 @@ function hygeabeConfig(_key) {
 function hygeabeSetConfig(_key, _value) {
   var input = document.querySelector('.eqLogicAttr[data-l1key="configuration"][data-l2key="' + _key + '"]')
   if (input !== null) { input.value = _value }
+}
+
+/* Récapitule l'adresse telle qu'elle sera enregistrée. Appelée à chaque fois
+   qu'un morceau change : recalculée seulement au chargement, elle restait à « - »
+   pendant toute la configuration, c'est-à-dire au seul moment où on la regarde. */
+function hygeabeShowAddress() {
+  var street = hygeabeConfig('street_label')
+  var zipcode = hygeabeConfig('zipcode_label')
+  var number = hygeabeConfig('house_number')
+
+  var parts = []
+  if (street !== '') { parts.push(street + ((number === '') ? '' : ' ' + number)) }
+  if (zipcode !== '') { parts.push(zipcode) }
+  document.getElementById('span_hygeabeAddress').textContent = (parts.length === 0) ? '-' : parts.join(', ')
 }
 
 /* Message affiché sous les boutons de test. */
@@ -178,6 +194,7 @@ function hygeabeCommitZipcode(_select) {
   document.getElementById('in_hygeabeStreet').value = ''
   hygeabeFillSelect(document.getElementById('sel_hygeabeStreet'), [], '', '{{Cherchez une rue}}')
 
+  hygeabeShowAddress()
   hygeabeMarkModified()
 }
 
@@ -187,6 +204,7 @@ function hygeabeCommitStreet(_select) {
 
   hygeabeSetConfig('street_id', id)
   hygeabeSetConfig('street_label', (id === '') ? '' : _select.options[_select.selectedIndex].textContent)
+  hygeabeShowAddress()
   hygeabeMarkModified()
 }
 
@@ -203,15 +221,10 @@ function printEqLogic(_eqLogic) {
   var zipcodeLabel = hygeabeConfig('zipcode_label')
   var streetId = hygeabeConfig('street_id')
   var streetLabel = hygeabeConfig('street_label')
-  var houseNumber = hygeabeConfig('house_number')
 
   document.getElementById('in_hygeabeZipcode').value = zipcodeLabel.split(' ')[0] || ''
   document.getElementById('in_hygeabeStreet').value = streetLabel
-
-  var address = []
-  if (streetLabel !== '') { address.push(streetLabel + ((houseNumber === '') ? '' : ' ' + houseNumber)) }
-  if (zipcodeLabel !== '') { address.push(zipcodeLabel) }
-  document.getElementById('span_hygeabeAddress').textContent = (address.length === 0) ? '-' : address.join(', ')
+  hygeabeShowAddress()
 
   hygeabeFillSelect(document.getElementById('sel_hygeabeZipcode'),
     (zipcodeId === '') ? [] : [{ id: zipcodeId, name: zipcodeLabel }], zipcodeId, '{{Cherchez un code postal}}')
@@ -240,7 +253,7 @@ function hygeabeLoadCollections(_id) {
   hygeabeAjax('collections', { id: _id }, function (result) {
     /* La réponse d'un équipement qu'on a quitté entre-temps remplirait le
        calendrier de celui qu'on regarde maintenant. */
-    if (hygeabeDisplayedId() !== _id) { return }
+    if (!hygeabeIsDisplayed(_id)) { return }
 
     tbody.innerHTML = ''
     document.getElementById('span_hygeabeLastUpdate').textContent =
@@ -255,7 +268,7 @@ function hygeabeLoadCollections(_id) {
     }
   }, {
     failure: function () {
-      if (hygeabeDisplayedId() !== _id) { return }
+      if (!hygeabeIsDisplayed(_id)) { return }
       message('{{Calendrier indisponible.}}')
     }
   })
@@ -396,6 +409,12 @@ function hygeabeSearchStreet(_button) {
    AJAX par jeedomUtils.loadPage, l'évènement DOMContentLoaded a déjà eu lieu.
    La garde évite qu'une absence du conteneur ne casse tout le fichier. */
 var hygeabeContainer = document.getElementById('div_pageContainer') || document.body
+
+hygeabeContainer.addEventListener('input', function (event) {
+  if (event.target.closest('.eqLogicAttr[data-l2key="house_number"]')) {
+    hygeabeShowAddress()
+  }
+})
 
 hygeabeContainer.addEventListener('change', function (event) {
   if (event.target.closest('#sel_hygeabeZipcode')) {

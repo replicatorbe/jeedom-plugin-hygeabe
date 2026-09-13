@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3 — 13/09/2026
+
+**Fixes**
+
+- The Calendar tab stayed empty and "Last refresh" always showed a dash: the
+  guard discarding the answer of a device left in the meantime compared an
+  integer with a string, and therefore rejected every answer.
+- "Address in use" was only recomputed when the device was loaded, so it stayed
+  empty throughout the whole configuration — the one moment it is looked at. It
+  now follows the locality, the street and the house number as they are entered.
+
 ## 0.2 — 13/09/2026
 
 **Dashboard**
