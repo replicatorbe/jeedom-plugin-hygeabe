@@ -499,12 +499,22 @@ class hygeabe extends eqLogic {
             $operator = $this->fetchOperator();
         }
 
+        /*
+         * Les déchets desservis, et pas seulement ceux qui tombent dans la
+         * fenêtre du calendrier : sapins de Noël, encombrants et verre n'y
+         * figurent qu'une fois l'an, ou jamais. Sans eux, leurs commandes
+         * n'existeraient qu'à partir du jour de la collecte — impossible d'écrire
+         * le scénario à l'avance, et la commande apparaîtrait sans prévenir.
+         */
+        $fractions = array_merge($this->fetchServedFractions(), $parsed['fractions']);
+        ksort($fractions);
+
         return array(
             'fetchedAt'   => time(),
             'address'     => $this->addressSignature(),
             'operator'    => $operator,
             'collections' => $parsed['collections'],
-            'fractions'   => $parsed['fractions'],
+            'fractions'   => $fractions,
         );
     }
 
@@ -579,6 +589,36 @@ class hygeabe extends eqLogic {
             return '';
         }
         return $date->setTimezone(self::timezone())->format('Y-m-d');
+    }
+
+    /*
+     * Les types de déchets desservis à l'adresse, calendrier ou non. Le service
+     * les décrit exactement comme dans une collecte : même identifiant de
+     * pictogramme, donc mêmes identifiants de commande, qu'une fraction vienne
+     * d'ici ou du calendrier.
+     */
+    private function fetchServedFractions() {
+        $lang = self::language();
+        $served = array();
+        try {
+            $items = self::requestAll('/fractions', array(
+                'zipcodeId'   => $this->getConfiguration('zipcode_id'),
+                'streetId'    => $this->getConfiguration('street_id'),
+                'houseNumber' => (int) $this->getConfiguration('house_number'),
+            ));
+            foreach ($items as $item) {
+                if (!isset($item['name'])) {
+                    continue;
+                }
+                $fraction = self::describeFraction($item, $lang);
+                $served[$fraction['slug']] = $fraction;
+            }
+        } catch (Throwable $e) {
+            // Information de confort : le calendrier vaut d'être enregistré même
+            // sans elle, les fractions qu'il contient suffisent à fonctionner.
+            log::add(__CLASS__, 'debug', __('Déchets desservis inconnus :', __FILE__) . ' ' . $e->getMessage());
+        }
+        return $served;
     }
 
     /* Le nom de l'intercommunale, pour vérifier que l'adresse relève bien d'Hygea. */

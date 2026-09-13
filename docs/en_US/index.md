@@ -74,6 +74,19 @@ With the "commands per waste type" option, each waste type adds:
 | `<Waste> : days left` | info / numeric |
 | `<Waste> : tomorrow` | info / binary |
 
+These commands exist for **every waste type served at the address**, not only
+those collected within the next two months: Christmas trees, bulky waste on
+demand and glass only show up in the calendar once a year, or never. You can
+therefore write today the scenario that will remind you to put the tree out in
+January.
+
+Out of season the date is empty and the days left value is `-1`, meaning "no
+known collection". That is also what you read when next year's calendar has not
+been published yet.
+
+> Test your conditions on `>= 0`, never on `== 0` alone: `-1` is not "today".
+> The "Collection today" command exists for that.
+
 ## On the dashboard
 
 Only one command is visible by default: **Next collection**. All the others

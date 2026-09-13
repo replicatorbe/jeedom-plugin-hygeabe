@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4 — 13/09/2026
+
+**Déchets saisonniers**
+
+- Les commandes sont désormais créées pour tous les déchets desservis à
+  l'adresse, et plus seulement pour ceux qui passent dans les deux mois. Les
+  sapins de Noël, les encombrants à domicile et le verre n'apparaissaient au
+  calendrier qu'une fois l'an : leur commande surgissait le jour venu, et on ne
+  pouvait pas écrire le scénario à l'avance.
+- Hors saison, la date reste vide et les jours restants valent `-1`.
+
 ## 0.3 — 13/09/2026
 
 **Correctif**

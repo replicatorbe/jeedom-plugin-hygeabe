@@ -75,6 +75,19 @@ Avec l'option « commandes par fraction », chaque type de déchet ajoute :
 | `<Déchet> : jours restants` | info / numeric |
 | `<Déchet> : demain` | info / binary |
 
+Ces commandes existent pour **tous les déchets desservis à l'adresse**, pas
+seulement pour ceux qui passent dans les deux mois : les sapins de Noël, les
+encombrants à domicile et le verre n'apparaissent au calendrier qu'une fois l'an,
+voire jamais. Vous pouvez donc écrire dès aujourd'hui le scénario qui vous
+rappellera de sortir le sapin en janvier.
+
+Hors saison, la date est vide et le nombre de jours restants vaut `-1`, qui
+signifie « aucune collecte connue ». C'est aussi la valeur qu'on lit quand le
+calendrier de l'année suivante n'est pas encore publié.
+
+> Testez vos conditions sur `>= 0`, jamais sur `== 0` seul : `-1` n'est pas
+> « aujourd'hui ». La commande « Collecte aujourd'hui » est là pour ça.
+
 ## Sur le dashboard
 
 Une seule commande est visible par défaut : **Prochaine collecte**. Toutes les

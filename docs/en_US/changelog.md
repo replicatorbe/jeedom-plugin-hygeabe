@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4 — 13/09/2026
+
+**Seasonal waste**
+
+- Commands are now created for every waste type served at the address, and no
+  longer only for those collected within the next two months. Christmas trees,
+  bulky waste on demand and glass only showed up in the calendar once a year:
+  their command appeared out of nowhere on the day, and the scenario could not
+  be written in advance.
+- Out of season the date stays empty and days left is `-1`.
+
 ## 0.3 — 13/09/2026
 
 **Fixes**

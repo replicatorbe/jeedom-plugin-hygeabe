@@ -40,7 +40,8 @@
         "samedi": "Saturday",
         "à sortir ce soir": "to take out tonight",
         "dans": "in",
-        "jours": "days"
+        "jours": "days",
+        "Déchets desservis inconnus :": "Served waste types unknown:"
     },
     "plugins/hygeabe/core/ajax/hygeabe.ajax.php": {
         "401 - Accès non autorisé": "401 - Access denied",
