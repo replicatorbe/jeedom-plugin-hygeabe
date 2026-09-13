@@ -26,8 +26,9 @@ try {
     ajax::init();
 
     /* Récupère un équipement du plugin.
-     * eqLogic::byId() charge n'importe quel équipement et le caste vers la classe
-     * appelante : sans ce contrôle, un id étranger provoquerait une Error fatale. */
+     * eqLogic::byId() charge n'importe quel équipement et le rend dans la classe
+     * de SON type : sans ce contrôle, un id étranger ferait agir le plugin sur
+     * l'équipement d'un autre. */
     $getHygeabe = function ($_id) {
         $eqLogic = hygeabe::byId($_id);
         if (!is_object($eqLogic) || $eqLogic->getEqType_name() != 'hygeabe') {
@@ -36,22 +37,40 @@ try {
         return $eqLogic;
     };
 
+    /* unautorizedInDemo() sur toutes les actions qui sortent de la box : une
+     * démonstration publique ne doit pas interroger un service extérieur. */
     if (init('action') == 'searchZipcode') {
+        unautorizedInDemo();
         ajax::success(hygeabe::searchZipcodes(init('q')));
     }
 
     if (init('action') == 'searchStreet') {
+        unautorizedInDemo();
         ajax::success(hygeabe::searchStreets(init('q'), init('zipcode')));
     }
 
     if (init('action') == 'testAddress') {
+        unautorizedInDemo();
         ajax::success(hygeabe::testAddress(init('zipcode'), init('street'), init('number')));
     }
 
     if (init('action') == 'refresh') {
         unautorizedInDemo();
         $eqLogic = $getHygeabe(init('id'));
+        if (!$eqLogic->isConfigured()) {
+            throw new Exception(__('Adresse incomplète : renseignez la localité, la rue et le numéro.', __FILE__));
+        }
+
         $calendar = $eqLogic->update(true);
+        /*
+         * update() ne lève pas quand un calendrier est déjà en cache : sans ce
+         * contrôle, une panne du service produirait un message vert « 37
+         * collectes connues » et l'utilisateur croirait son calendrier à jour.
+         */
+        if ($eqLogic->getRefreshError() != '') {
+            throw new Exception($eqLogic->getRefreshError());
+        }
+
         $count = isset($calendar['collections']) ? count($calendar['collections']) : 0;
         ajax::success(array(
             'summary' => $count . ' ' . __('collectes connues pour cette adresse.', __FILE__),

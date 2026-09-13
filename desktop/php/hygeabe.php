@@ -22,13 +22,13 @@ $eqLogics = eqLogic::byType($plugin->getId());
 				<span>{{Configuration}}</span>
 			</div>
 		</div>
-		<legend><i class="fas fa-trash"></i> {{Mes adresses}}</legend>
+		<legend><i class="fas fa-list"></i> {{Mes adresses}}</legend>
 		<?php
 		if (count($eqLogics) == 0) {
 			echo '<div class="alert alert-info" style="margin:5px;">';
 			echo '<b>{{Aucune adresse pour le moment. Pour démarrer :}}</b>';
 			echo '<ol style="margin:5px 0 0 0;padding-left:20px;">';
-			echo '<li>{{Cliquez sur « Ajouter une adresse » et donnez-lui un nom, par exemple « Maison ».}}</li>';
+			echo '<li>{{Cliquez sur « Ajouter une adresse » et donnez-lui un nom, par exemple « Collectes ».}}</li>';
 			echo '<li>{{Saisissez le code postal, puis choisissez la localité proposée.}}</li>';
 			echo '<li>{{Saisissez les premières lettres de la rue, puis choisissez-la dans la liste.}}</li>';
 			echo '<li>{{Indiquez le numéro de maison et enregistrez : les commandes sont créées et le calendrier est récupéré.}}</li>';
@@ -46,7 +46,7 @@ $eqLogics = eqLogic::byType($plugin->getId());
 		foreach ($eqLogics as $eqLogic) {
 			$opacity = ($eqLogic->getIsEnable()) ? '' : 'disableCard';
 			echo '<div class="eqLogicDisplayCard cursor ' . $opacity . '" data-eqLogic_id="' . $eqLogic->getId() . '">';
-			echo '<i class="fas fa-trash-alt" style="font-size:4em;"></i>';
+			echo '<i class="fas fa-map-marker-alt" style="font-size:4em;"></i>';
 			echo '<br>';
 			echo '<span class="name">' . $eqLogic->getHumanName(true, true) . '</span>';
 			echo '<span class="hiddenAsCard displayTableRight hidden">';
@@ -71,7 +71,7 @@ $eqLogics = eqLogic::byType($plugin->getId());
 			<li role="presentation"><a href="#" class="eqLogicAction" aria-controls="home" role="tab" data-toggle="tab" data-action="returnToThumbnailDisplay"><i class="fas fa-arrow-circle-left"></i></a></li>
 			<li role="presentation" class="active"><a href="#eqlogictab" aria-controls="home" role="tab" data-toggle="tab"><i class="fas fa-tachometer-alt"></i><span class="hidden-xs"> {{Équipement}}</span></a></li>
 			<li role="presentation"><a href="#collectiontab" aria-controls="home" role="tab" data-toggle="tab"><i class="fas fa-calendar-alt"></i><span class="hidden-xs"> {{Calendrier}}</span></a></li>
-			<li role="presentation"><a href="#commandtab" aria-controls="profile" role="tab" data-toggle="tab"><i class="fas fa-list"></i><span class="hidden-xs"> {{Commandes}}</span></a></li>
+			<li role="presentation"><a href="#commandtab" aria-controls="home" role="tab" data-toggle="tab"><i class="fas fa-list"></i><span class="hidden-xs"> {{Commandes}}</span></a></li>
 		</ul>
 
 		<div class="tab-content">
@@ -86,7 +86,7 @@ $eqLogics = eqLogic::byType($plugin->getId());
 								<label class="col-sm-3 control-label">{{Nom}}</label>
 								<div class="col-sm-6">
 									<input type="text" class="eqLogicAttr form-control" data-l1key="id" style="display:none;">
-									<input type="text" class="eqLogicAttr form-control" data-l1key="name" placeholder="{{Maison}}">
+									<input type="text" class="eqLogicAttr form-control" data-l1key="name" placeholder="{{Collectes}}">
 								</div>
 							</div>
 							<div class="form-group">
@@ -173,17 +173,17 @@ $eqLogics = eqLogic::byType($plugin->getId());
 							<div class="form-group">
 								<label class="col-sm-3 control-label">{{Numéro}}</label>
 								<div class="col-sm-2">
-									<input type="text" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="house_number" placeholder="1">
+									<input type="number" min="1" step="1" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="house_number" placeholder="1">
 								</div>
 								<div class="col-sm-6">
-									<span class="help-block" style="margin:0;">{{Le numéro de maison sert à départager les rues collectées en deux tournées. Sans lui, le calendrier peut être celui du voisin d'en face.}}</span>
+									<span class="help-block" style="margin:0;">{{Le numéro de maison sert à départager les rues collectées en deux tournées. Sans lui, le calendrier peut être celui du voisin d'en face. Le service n'accepte qu'un entier : les bis et les lettres ne lui sont pas transmis.}}</span>
 								</div>
 							</div>
 							<div class="form-group">
 								<label class="col-sm-3 control-label">&nbsp;</label>
 								<div class="col-sm-9">
 									<a class="btn btn-info" id="bt_hygeabeTestAddress"><i class="fas fa-vial"></i> {{Tester l'adresse}}</a>
-									<a class="btn btn-default" id="bt_hygeabeRefresh"><i class="fas fa-sync"></i> {{Rafraîchir maintenant}}</a>
+									<a class="btn btn-default" id="bt_hygeabeRefresh" title="{{Relit le calendrier de l'adresse enregistrée. Inutile juste après une sauvegarde, qui le fait déjà.}}"><i class="fas fa-sync"></i> {{Rafraîchir maintenant}}</a>
 								</div>
 							</div>
 							<div class="form-group">
@@ -243,7 +243,8 @@ $eqLogics = eqLogic::byType($plugin->getId());
 				<br>
 				<div class="col-lg-12">
 					<div class="alert alert-info" style="margin-bottom:10px;">{{Les collectes connues pour cette adresse, telles que le service les publie. Ce calendrier est relu à chaque rafraîchissement.}}</div>
-					<table id="table_hygeabeCollections" class="table table-bordered table-condensed">
+					<div class="table-responsive">
+						<table id="table_hygeabeCollections" class="table table-bordered table-condensed">
 						<thead>
 							<tr>
 								<th style="width:220px;">{{Date}}</th>
@@ -252,7 +253,8 @@ $eqLogics = eqLogic::byType($plugin->getId());
 							</tr>
 						</thead>
 						<tbody></tbody>
-					</table>
+						</table>
+					</div>
 				</div>
 			</div>
 

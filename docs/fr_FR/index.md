@@ -26,7 +26,7 @@ Plugins → Organisation → Hygea → **Ajouter une adresse**.
 
 | Champ | Valeur |
 |---|---|
-| Nom | ce que vous voulez, par exemple `Maison` |
+| Nom | ce que vous voulez, par exemple `Collectes` |
 | Code postal | tapez-le, puis cliquez sur la loupe |
 | Localité | choisissez-la dans la liste |
 | Rue | tapez les premières lettres, cliquez sur la loupe, choisissez |
@@ -63,7 +63,7 @@ coupées en deux tronçons. Le numéro départage.
 | Jours avant la prochaine collecte | info / numeric | `0` le jour même, `1` la veille |
 | Collecte aujourd'hui | info / binary | |
 | Collecte demain | info / binary | la commande à surveiller pour être prévenu la veille au soir |
-| Déchets à sortir ce soir | info / binary | les fractions de la collecte de demain, vide s'il n'y en a pas |
+| Déchets à sortir ce soir | info / string | les fractions de la collecte de demain, vide s'il n'y en a pas |
 | Intercommunale | info / string | `HYGEA`, `TIBI`... le nom renvoyé par le service |
 | Rafraîchir | action | relit le calendrier immédiatement |
 
@@ -91,21 +91,21 @@ sortir :
 
 ```
 Déclencheur : programmation, 0 20 * * *
-Si : #[Maison][Hygea][Collecte demain]# == 1
+Si : #[Maison][Collectes][Collecte demain]# == 1
 Alors : message::notification avec
-        "À sortir ce soir : " + #[Maison][Hygea][Déchets à sortir ce soir]#
+        "À sortir ce soir : " + #[Maison][Collectes][Déchets à sortir ce soir]#
 ```
 
 N'annoncer que la poubelle bleue :
 
 ```
-Si : #[Maison][Hygea][PMC : demain]# == 1
+Si : #[Maison][Collectes][PMC : demain]# == 1
 ```
 
 Rappeler le matin même, si la collecte est encore à venir :
 
 ```
-Si : #[Maison][Hygea][Jours avant la prochaine collecte]# == 0
+Si : #[Maison][Collectes][Jours avant la prochaine collecte]# == 0
 ```
 
 ## Configuration du plugin
@@ -118,7 +118,7 @@ Si : #[Maison][Hygea][Jours avant la prochaine collecte]# == 0
 
 ## Fréquence des appels
 
-Le plugin relit le calendrier **une fois par jour** au maximum, et recalcule ses
+Le plugin relit le calendrier **au plus une fois toutes les 20 heures**, et recalcule ses
 commandes toutes les heures sans toucher au réseau. Les conditions d'utilisation
 du service demandent un usage raisonnable : évitez de multiplier les
 rafraîchissements manuels ou les scénarios qui appellent la commande
@@ -129,7 +129,7 @@ un message apparaît dans le centre de messages. Rien n'est effacé.
 
 ## En cas de problème
 
-Les journaux sont dans Analyse → Historique, log `hygeabe`.
+Les journaux sont dans Analyse → Logs, log `hygeabe`.
 
 | Symptôme | Cause probable |
 |---|---|

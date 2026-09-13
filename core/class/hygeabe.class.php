@@ -37,6 +37,11 @@ class hygeabe extends eqLogic {
      * pas le solliciter davantage. */
     const CALENDAR_TTL = 72000;
 
+    /* Valeur d'une commande « jours restants » quand la date est inconnue. Une
+     * chaîne vide serait convertie en 0 par le coeur, c'est-à-dire « collecte
+     * aujourd'hui ». */
+    const UNKNOWN_DAYS = -1;
+
     /*
      * L'identifiant du pictogramme est la seule clé stable d'un type de déchet :
      * le libellé change avec la langue et avec l'intercommunale. On s'en sert
@@ -64,6 +69,10 @@ class hygeabe extends eqLogic {
     /* Jours et mois écrits en toutes lettres : IntlDateFormatter n'est pas
      * garanti présent sur toutes les installations Jeedom. */
     public static $_days = array('dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi');
+
+    /* Cause du dernier échec de lecture, pour que le contrôleur ajax puisse
+     * répondre autre chose qu'un succès quand rien n'a été rafraîchi. */
+    private $_refreshError = '';
 
     /* ==================================================================== CRON */
 
@@ -97,11 +106,14 @@ class hygeabe extends eqLogic {
         }
         $this->setConfiguration('rollover_hour', min(23, max(0, (int) $this->getConfiguration('rollover_hour'))));
 
-        // Le service refuse un numéro qui n'est pas un entier positif : « 3A »
-        // ferait échouer chaque rafraîchissement avec une erreur 400 obscure.
+        /*
+         * Le service n'accepte qu'un entier positif. Un texte qui n'en contient
+         * pas est effacé plutôt que ramené à 1 : le calendrier du numéro 1 est
+         * peut-être celui d'une autre tournée, et l'erreur serait invisible.
+         */
         $number = trim((string) $this->getConfiguration('house_number'));
         if ($number !== '') {
-            $this->setConfiguration('house_number', max(1, (int) $number));
+            $this->setConfiguration('house_number', ((int) $number < 1) ? '' : (int) $number);
         }
         $this->setConfiguration('street_id', trim((string) $this->getConfiguration('street_id')));
         $this->setConfiguration('zipcode_id', trim((string) $this->getConfiguration('zipcode_id')));
@@ -135,6 +147,10 @@ class hygeabe extends eqLogic {
          * doit donc être nettoyé tant que l'identifiant est encore lisible.
          */
         $this->clearCalendar();
+        // Sans cela le message reste au centre de messages avec un identifiant
+        // qu'aucun code ne pourra plus faire correspondre : impossible à effacer
+        // autrement qu'à la main.
+        $this->clearProblem();
         return true;
     }
 
@@ -170,9 +186,6 @@ class hygeabe extends eqLogic {
         $cmd->setSubType($_subType);
         $cmd->setIsVisible(isset($_options['isVisible']) ? $_options['isVisible'] : 1);
         $cmd->setIsHistorized(isset($_options['isHistorized']) ? $_options['isHistorized'] : 0);
-        if (isset($_options['generic_type'])) {
-            $cmd->setGeneric_type($_options['generic_type']);
-        }
         if (isset($_options['order'])) {
             $cmd->setOrder($_options['order']);
         }
@@ -197,10 +210,12 @@ class hygeabe extends eqLogic {
             'order'    => $order++,
             'template' => 'hygeabe::hygeabe',
         ));
+        /* Pas d'historisation : history.value est un varchar(127) et une journée
+         * à sept fractions dépasse la limite. L'historique utile est celui de
+         * « Jours avant la prochaine collecte ». */
         $this->addCmdIfMissing('summary', 'Résumé', 'info', 'string', array(
-            'isVisible'    => 0,
-            'isHistorized' => 1,
-            'order'        => $order++,
+            'isVisible' => 0,
+            'order'     => $order++,
         ));
         $this->addCmdIfMissing('next_date', 'Date de la prochaine collecte', 'info', 'string', array(
             'isVisible' => 0,
@@ -256,22 +271,33 @@ class hygeabe extends eqLogic {
         }
     }
 
-    /*
-     * Supprime les commandes de fractions qui ne figurent plus au calendrier.
-     * Appelée uniquement avec un calendrier non vide : une liste vide prise pour
-     * argent comptant effacerait toutes les commandes de l'équipement le jour où
-     * le service ne répond pas.
-     */
-    private function removeStaleFractionCommands($_slugs) {
+    /* Les identifiants de fraction pour lesquels des commandes existent déjà. */
+    private function existingFractionSlugs() {
+        $slugs = array();
         foreach ($this->getCmd() as $cmd) {
             if (strpos($cmd->getLogicalId(), 'fraction::') !== 0) {
                 continue;
             }
             $parts = explode('::', $cmd->getLogicalId());
-            if (!isset($parts[1]) || in_array($parts[1], $_slugs)) {
-                continue;
+            if (isset($parts[1]) && !in_array($parts[1], $slugs)) {
+                $slugs[] = $parts[1];
             }
-            $cmd->remove();
+        }
+        return $slugs;
+    }
+
+    /*
+     * Supprime toutes les commandes de fractions. Réservé au décochage de
+     * l'option : une fraction absente du calendrier du moment ne doit JAMAIS
+     * être supprimée, sans quoi les collectes saisonnières (sapins, encombrants)
+     * disparaîtraient hors saison et reviendraient avec un nouvel identifiant,
+     * laissant muets les scénarios bâtis dessus.
+     */
+    private function removeFractionCommands() {
+        foreach ($this->getCmd() as $cmd) {
+            if (strpos($cmd->getLogicalId(), 'fraction::') === 0) {
+                $cmd->remove();
+            }
         }
     }
 
@@ -282,16 +308,12 @@ class hygeabe extends eqLogic {
     }
 
     private function clearCalendar() {
-        $cache = cache::byKey($this->cacheKey());
-        if (is_object($cache)) {
-            $cache->remove();
-        }
+        cache::delete($this->cacheKey());
     }
 
     /* Le calendrier en cache, ou un tableau vide s'il n'y en a pas encore. */
     public function getCalendar() {
-        $cache = cache::byKey($this->cacheKey());
-        $value = is_object($cache) ? $cache->getValue('') : '';
+        $value = cache::byKey($this->cacheKey())->getValue('');
         if ($value === '') {
             return array();
         }
@@ -306,8 +328,11 @@ class hygeabe extends eqLogic {
      * à chaque minuit.
      */
     public function update($_force = false) {
+        $this->_refreshError = '';
+
         if (!$this->isConfigured()) {
-            $this->reportProblem(__('Adresse incomplète : renseignez la localité, la rue et le numéro.', __FILE__));
+            $this->_refreshError = __('Adresse incomplète : renseignez la localité, la rue et le numéro.', __FILE__);
+            $this->reportProblem($this->_refreshError);
             return array();
         }
 
@@ -325,6 +350,7 @@ class hygeabe extends eqLogic {
                  * doit pas vider les commandes ni faire disparaître la prochaine
                  * collecte du dashboard.
                  */
+                $this->_refreshError = $e->getMessage();
                 $this->reportProblem($e->getMessage());
                 if (empty($calendar)) {
                     throw $e;
@@ -336,26 +362,52 @@ class hygeabe extends eqLogic {
         return $calendar;
     }
 
+    /* Ce qui a empêché la dernière lecture, ou une chaîne vide si tout s'est
+     * bien passé. Le contrôleur ajax s'en sert pour ne pas annoncer un succès
+     * là où rien n'a été relu. */
+    public function getRefreshError() {
+        return $this->_refreshError;
+    }
+
+    /* Interroge le service et range le calendrier par date. */
     /* Interroge le service et range le calendrier par date. */
     private function fetchCalendar() {
-        $lang     = self::language();
-        $from     = new DateTimeImmutable('today', self::timezone());
-        $until    = $from->modify('+' . max(7, (int) config::byKey('days_ahead', __CLASS__, 60)) . ' days');
-        $zipcode  = $this->getConfiguration('zipcode_id');
-        $street   = $this->getConfiguration('street_id');
+        $from  = new DateTimeImmutable('today', self::timezone());
+        $until = $from->modify('+' . max(7, (int) config::byKey('days_ahead', __CLASS__, 60)) . ' days');
 
         $items = self::requestAll('/collections', array(
-            'zipcodeId'   => $zipcode,
-            'streetId'    => $street,
+            'zipcodeId'   => $this->getConfiguration('zipcode_id'),
+            'streetId'    => $this->getConfiguration('street_id'),
             'houseNumber' => (int) $this->getConfiguration('house_number'),
             'fromDate'    => $from->format('Y-m-d'),
             'untilDate'   => $until->format('Y-m-d'),
         ));
 
+        $parsed = self::parseCollections($items);
+
+        return array(
+            'fetchedAt'   => time(),
+            'operator'    => $this->fetchOperator(),
+            'collections' => $parsed['collections'],
+            'fractions'   => $parsed['fractions'],
+        );
+    }
+
+    /*
+     * Range les lignes renvoyées par le service en un calendrier par date. Une
+     * seule implémentation pour le cron et pour le bouton de test : deux
+     * lectures divergentes finiraient par annoncer deux dates différentes.
+     */
+    public static function parseCollections($_items) {
+        $lang  = self::language();
         $dates = array();
         $seen  = array();
-        foreach ($items as $item) {
-            if (!isset($item['type']) || $item['type'] != 'collection' || !isset($item['fraction'])) {
+
+        foreach ($_items as $item) {
+            if (!isset($item['type']) || $item['type'] != 'collection') {
+                continue;
+            }
+            if (!isset($item['fraction']) || !is_array($item['fraction']) || !isset($item['timestamp'])) {
                 continue;
             }
             /* Une collecte annulée pointe la collecte qui la remplace : l'afficher
@@ -363,10 +415,11 @@ class hygeabe extends eqLogic {
             if (!empty($item['exception']['replacedBy'])) {
                 continue;
             }
-            if (!isset($item['timestamp'])) {
+
+            $date = self::collectionDate($item['timestamp']);
+            if ($date === '') {
                 continue;
             }
-            $date = substr($item['timestamp'], 0, 10);
             $fraction = self::describeFraction($item['fraction'], $lang);
 
             if (!isset($dates[$date])) {
@@ -380,32 +433,49 @@ class hygeabe extends eqLogic {
             $dates[$date][$fraction['slug']] = $fraction;
             $seen[$fraction['slug']] = $fraction;
         }
+        // Le service rend ses lignes dans l'ordre, mais rien ne l'y oblige et
+        // requestAll concatène plusieurs pages : trier est le seul moyen sûr
+        // d'annoncer la bonne « prochaine » collecte.
         ksort($dates);
 
         $collections = array();
         foreach ($dates as $date => $fractions) {
             $collections[] = array('date' => $date, 'fractions' => array_values($fractions));
         }
+        return array('collections' => $collections, 'fractions' => $seen);
+    }
 
-        return array(
-            'fetchedAt'   => time(),
-            'operator'    => $this->fetchOperator(),
-            'collections' => $collections,
-            'fractions'   => $seen,
-        );
+    /*
+     * La date d'une collecte. Le service date toujours à minuit UTC, mais lire
+     * les dix premiers caractères se tromperait d'un jour le jour où il
+     * publierait une heure réelle.
+     */
+    public static function collectionDate($_timestamp) {
+        try {
+            $date = new DateTimeImmutable($_timestamp);
+        } catch (Throwable $e) {
+            return '';
+        }
+        return $date->setTimezone(self::timezone())->format('Y-m-d');
     }
 
     /* Le nom de l'intercommunale, pour vérifier que l'adresse relève bien d'Hygea. */
     private function fetchOperator() {
+        return self::operatorName($this->getConfiguration('zipcode_id'));
+    }
+
+    public static function operatorName($_zipcodeId) {
         try {
-            $organisation = self::request('/organisations/' . rawurlencode($this->getConfiguration('zipcode_id')));
+            $organisation = self::request('/organisations/' . rawurlencode($_zipcodeId));
             return isset($organisation['name']) ? $organisation['name'] : '';
         } catch (Throwable $e) {
-            // Information de confort : son absence ne justifie pas de tout arrêter.
+            // Information de confort : son absence ne justifie pas de faire
+            // échouer une adresse par ailleurs valide.
             log::add(__CLASS__, 'debug', __('Intercommunale inconnue :', __FILE__) . ' ' . $e->getMessage());
             return '';
         }
     }
+
 
     /* ========================================================= MISE À JOUR DES CMD */
 
@@ -415,24 +485,31 @@ class hygeabe extends eqLogic {
 
         /*
          * L'heure de bascule évite d'annoncer encore « prochaine collecte :
-         * aujourd'hui » à 18 h, alors que le camion est passé le matin.
+         * aujourd'hui » à 18 h, alors que le camion est passé le matin. Elle ne
+         * vaut que pour « la prochaine » : la commande « Collecte aujourd'hui »,
+         * elle, doit rester vraie toute la journée, c'est sur elle que se
+         * déclenche le scénario qui fait rentrer les poubelles.
          */
         $rollover = (int) $this->getConfiguration('rollover_hour', 0);
         $passed = ($rollover > 0 && (int) (new DateTimeImmutable('now', self::timezone()))->format('G') >= $rollover);
 
         $next = null;
         $tomorrow = null;
+        $today_collection = null;
         foreach ($collections as $collection) {
             $days = self::daysUntil($collection['date'], $today);
-            if ($days < 0 || ($days === 0 && $passed)) {
+            if ($days < 0) {
                 continue;
             }
-            if ($next === null) {
-                $next = $collection;
-                $next['days'] = $days;
+            if ($days === 0) {
+                $today_collection = $collection;
             }
             if ($days === 1) {
                 $tomorrow = $collection;
+            }
+            if ($next === null && !($days === 0 && $passed)) {
+                $next = $collection;
+                $next['days'] = $days;
             }
         }
 
@@ -441,7 +518,12 @@ class hygeabe extends eqLogic {
             $this->checkAndUpdateCmd('summary', __('Aucune collecte connue', __FILE__));
             $this->checkAndUpdateCmd('next_date', '');
             $this->checkAndUpdateCmd('next_fractions', '');
-            $this->checkAndUpdateCmd('next_days', '');
+            /*
+             * -1 et non la chaîne vide : le coeur convertit une valeur vide en 0
+             * sur une commande numérique, c'est-à-dire exactement « collecte
+             * aujourd'hui ». Un scénario se déclencherait tous les jours.
+             */
+            $this->checkAndUpdateCmd('next_days', self::UNKNOWN_DAYS);
         } else {
             $names = array();
             $badges = array();
@@ -457,7 +539,7 @@ class hygeabe extends eqLogic {
             $this->checkAndUpdateCmd('next_days', $next['days']);
         }
 
-        $this->checkAndUpdateCmd('today', ($next !== null && $next['days'] === 0) ? 1 : 0);
+        $this->checkAndUpdateCmd('today', ($today_collection !== null) ? 1 : 0);
         $this->checkAndUpdateCmd('tomorrow', ($tomorrow !== null) ? 1 : 0);
         $this->checkAndUpdateCmd('tomorrow_fractions', ($tomorrow === null) ? '' : implode(', ', array_column($tomorrow['fractions'], 'name')));
         $this->checkAndUpdateCmd('operator', isset($_calendar['operator']) ? $_calendar['operator'] : '');
@@ -466,25 +548,25 @@ class hygeabe extends eqLogic {
     }
 
     private function refreshFractionCommands($_collections, $_today, $_passed, $_fractions) {
-        /*
-         * Un calendrier vide ne prouve rien : c'est peut-être le service qui
-         * n'a pas répondu. On ne supprime donc jamais de commande sur cette base.
-         */
-        if (empty($_fractions)) {
-            return;
-        }
         if ($this->getConfiguration('per_fraction') != 1) {
             // L'option vient d'être retirée : les commandes qu'elle avait créées
             // resteraient sinon à l'écran, figées sur leur dernière valeur.
-            $this->removeStaleFractionCommands(array());
+            $this->removeFractionCommands();
             return;
         }
         $this->createFractionCommands($_fractions);
-        $this->removeStaleFractionCommands(array_keys($_fractions));
 
-        foreach ($_fractions as $slug => $fraction) {
+        /*
+         * On traite aussi les fractions qui ont une commande mais ne figurent
+         * plus au calendrier : leurs valeurs repassent à « inconnu » au lieu de
+         * rester bloquées sur le dernier chiffre vu. Les commandes, elles,
+         * survivent — voir removeFractionCommands().
+         */
+        $slugs = array_unique(array_merge(array_keys($_fractions), $this->existingFractionSlugs()));
+
+        foreach ($slugs as $slug) {
             $date = '';
-            $days = '';
+            $days = self::UNKNOWN_DAYS;
             foreach ($_collections as $collection) {
                 $remaining = self::daysUntil($collection['date'], $_today);
                 if ($remaining < 0 || ($remaining === 0 && $_passed)) {
@@ -503,11 +585,19 @@ class hygeabe extends eqLogic {
         }
     }
 
+
     /* ================================================================= MESSAGES */
 
     private function reportProblem($_text) {
         $text = $this->getHumanName() . ' ' . $_text;
         log::add(__CLASS__, 'error', $text);
+        /*
+         * message::save() ne met à jour que la date et le compteur d'un message
+         * existant, jamais son texte : sans cet effacement préalable, la
+         * première cause resterait affichée pour toujours — « adresse
+         * incomplète » longtemps après que l'adresse a été complétée.
+         */
+        message::removeAll(__CLASS__, 'address' . $this->getId());
         // log::add ne publie rien dans le centre de messages : sans ce message,
         // une adresse en panne reste invisible tant qu'on n'ouvre pas les logs.
         message::add(__CLASS__, $text, '', 'address' . $this->getId());
@@ -611,13 +701,18 @@ class hygeabe extends eqLogic {
         if ($base == '') {
             $base = self::API_HOST;
             $settings = self::httpGet(self::API_SETTINGS, 5);
-            if ($settings !== false) {
-                $decoded = json_decode($settings, true);
-                if (isset($decoded['API']) && strpos($decoded['API'], 'https://') === 0) {
-                    $base = rtrim($decoded['API'], '/');
-                }
+            $decoded = ($settings === false) ? null : json_decode($settings, true);
+
+            if (isset($decoded['API']) && strpos($decoded['API'], 'https://') === 0) {
+                $base = rtrim($decoded['API'], '/');
+                cache::set('hygeabe::apiBase', $base, 604800);
             }
-            cache::set('hygeabe::apiBase', $base, 604800);
+            /*
+             * Rien n'est mis en cache si le site n'a pas répondu : figer
+             * l'adresse par défaut pour une semaine neutraliserait justement la
+             * réparation automatique le jour où l'API déménage pendant que
+             * recycleapp.be est indisponible.
+             */
         }
         return $base . self::API_PATH;
     }
@@ -627,7 +722,7 @@ class hygeabe extends eqLogic {
      * déclenche une seule relecture de l'adresse de base, puis un second essai :
      * le plugin se répare tout seul sans intervention.
      */
-    public static function request($_path, $_params = array(), $_retry = true) {
+    public static function call($_path, $_params = array(), $_retry = true) {
         $url = self::apiBase() . $_path;
         if (count($_params) > 0) {
             $url .= '?' . http_build_query($_params);
@@ -638,37 +733,53 @@ class hygeabe extends eqLogic {
 
         /*
          * Seules l'absence de réponse et une panne serveur peuvent signer un
-         * déménagement de l'API. Un 404 est une réponse en bonne et due forme —
-         * le confondre avec une panne masquerait une adresse erronée derrière un
-         * message de service indisponible.
+         * déménagement de l'API. Les autres codes sont des réponses en bonne et
+         * due forme — les confondre avec une panne masquerait une adresse
+         * erronée derrière un message de service indisponible.
          */
         if ($body === false || $code >= 500) {
             if ($_retry) {
                 log::add(__CLASS__, 'debug', __('Nouvelle lecture de l\'adresse du service après un échec sur :', __FILE__) . ' ' . $_path);
                 self::apiBase(true);
-                return self::request($_path, $_params, false);
+                return self::call($_path, $_params, false);
             }
             throw new Exception(__('Le service de collecte ne répond pas', __FILE__)
                 . ' (' . (($code == 0) ? __('aucune réponse', __FILE__) : 'HTTP ' . $code) . ').');
         }
+
+        $decoded = ($body === '') ? array() : json_decode($body, true);
+        return array('code' => $code, 'body' => is_array($decoded) ? $decoded : array());
+    }
+
+    /* Un appel dont on attend une réponse exploitable : tout code inattendu
+     * devient une exception au message compréhensible. */
+    public static function request($_path, $_params = array()) {
+        $response = self::call($_path, $_params);
+        $code = $response['code'];
+
         if ($code == 400) {
-            throw new Exception(__('Le service a refusé la demande : vérifiez la localité, la rue et le numéro.', __FILE__));
+            // Le détail du service distingue une adresse fautive d'un paramètre
+            // que le plugin envoie mal : sans lui, l'utilisateur irait casser une
+            // configuration correcte.
+            throw new Exception(__('Le service a refusé la demande : vérifiez la localité, la rue et le numéro.', __FILE__)
+                . self::serviceDetail($response['body']));
         }
         if ($code == 404) {
             throw new Exception(__('Adresse inconnue du service : cette rue n\'appartient pas à cette localité.', __FILE__));
         }
         if ($code != 200 && $code != 204) {
-            throw new Exception(__('Réponse inattendue du service de collecte :', __FILE__) . ' HTTP ' . $code);
+            throw new Exception(__('Réponse inattendue du service de collecte :', __FILE__) . ' HTTP ' . $code
+                . self::serviceDetail($response['body']));
         }
+        return $response['body'];
+    }
 
-        $decoded = json_decode($body, true);
-        if ($code == 204 || $body === '') {
-            return array();
+    /* Le message technique renvoyé par le service, entre parenthèses. */
+    private static function serviceDetail($_body) {
+        if (!isset($_body['message']) || !is_string($_body['message'])) {
+            return '';
         }
-        if (!is_array($decoded)) {
-            throw new Exception(__('Réponse illisible du service de collecte.', __FILE__));
-        }
-        return $decoded;
+        return ' (' . __('réponse du service :', __FILE__) . ' ' . $_body['message'] . ')';
     }
 
     /*
@@ -682,6 +793,10 @@ class hygeabe extends eqLogic {
         do {
             $response = self::request($_path, array_merge($_params, array('size' => 200, 'page' => $page)));
             if (!isset($response['items']) || !is_array($response['items'])) {
+                // Une page illisible rendrait un calendrier tronqué qui passerait
+                // pour complet : le dire, sinon la cause est introuvable.
+                log::add(__CLASS__, 'warning', __('Page de résultats illisible, calendrier possiblement incomplet :', __FILE__)
+                       . ' ' . $_path . ' (page ' . $page . ')');
                 break;
             }
             $items = array_merge($items, $response['items']);
@@ -782,10 +897,28 @@ class hygeabe extends eqLogic {
      * couple localité / rue, puis la présence réelle de collectes.
      */
     public static function testAddress($_zipcodeId, $_streetId, $_houseNumber) {
-        if ($_zipcodeId == '' || $_streetId == '' || $_houseNumber == '') {
+        if ($_zipcodeId == '' || $_streetId == '' || (int) $_houseNumber < 1) {
             throw new Exception(__('Renseignez la localité, la rue et le numéro avant de tester.', __FILE__));
         }
-        self::request('/streets/validate', array('zipcodeId' => $_zipcodeId, 'streetId' => $_streetId));
+
+        /*
+         * Le numéro est obligatoire ici : sans lui le service répond 409 même
+         * pour une adresse parfaitement valide. Le 409 sert justement à
+         * distinguer les causes, il ne faut donc pas le traiter comme une panne.
+         */
+        $validation = self::call('/streets/validate', array(
+            'zipcodeId'   => $_zipcodeId,
+            'streetId'    => $_streetId,
+            'houseNumber' => (int) $_houseNumber,
+        ));
+        if ($validation['code'] == 409 && isset($validation['body']['zipcodeStreetValid'])
+            && $validation['body']['zipcodeStreetValid'] === false) {
+            throw new Exception(__('Cette rue n\'appartient pas à cette localité : refaites la recherche après avoir choisi la bonne localité.', __FILE__));
+        }
+        if ($validation['code'] != 204 && $validation['code'] != 200) {
+            throw new Exception(__('Le service n\'a pas reconnu cette adresse.', __FILE__)
+                . ' (HTTP ' . $validation['code'] . ')');
+        }
 
         $from = new DateTimeImmutable('today', self::timezone());
         $items = self::requestAll('/collections', array(
@@ -795,39 +928,28 @@ class hygeabe extends eqLogic {
             'fromDate'    => $from->format('Y-m-d'),
             'untilDate'   => $from->modify('+60 days')->format('Y-m-d'),
         ));
-        if (count($items) == 0) {
+
+        $parsed = self::parseCollections($items);
+        if (count($parsed['collections']) == 0) {
             throw new Exception(__('Adresse valide, mais aucune collecte publiée pour les deux mois à venir. Vérifiez le numéro de maison.', __FILE__));
         }
 
-        $organisation = self::request('/organisations/' . rawurlencode($_zipcodeId));
-        $operator = isset($organisation['name']) ? $organisation['name'] : __('inconnue', __FILE__);
-
-        $lang = self::language();
-        $first = null;
-        $names = array();
-        foreach ($items as $item) {
-            if (!isset($item['type']) || $item['type'] != 'collection' || !isset($item['timestamp'])) {
-                continue;
-            }
-            $date = substr($item['timestamp'], 0, 10);
-            if ($first === null) {
-                $first = $date;
-            }
-            if ($date != $first) {
-                continue;
-            }
-            $fraction = self::describeFraction($item['fraction'], $lang);
-            $names[$fraction['slug']] = $fraction['name'];
+        $first = $parsed['collections'][0];
+        $days = self::daysUntil($first['date']);
+        $operator = self::operatorName($_zipcodeId);
+        if ($operator == '') {
+            $operator = __('inconnue', __FILE__);
         }
 
         return array(
             'operator' => $operator,
             'summary'  => __('Intercommunale :', __FILE__) . ' ' . $operator . '. '
-                        . __('Prochaine collecte le', __FILE__) . ' ' . self::humanDate($first, self::daysUntil($first))
-                        . ' : ' . implode(', ', $names) . '.',
+                        . __('Prochaine collecte le', __FILE__) . ' ' . self::humanDate($first['date'], $days)
+                        . ' : ' . implode(', ', array_column($first['fractions'], 'name')) . '.',
         );
     }
 }
+
 
 class hygeabeCmd extends cmd {
 
@@ -836,8 +958,15 @@ class hygeabeCmd extends cmd {
 
         switch ($this->getLogicalId()) {
             case 'refresh':
-                // update() lève une exception détaillant la cause d'un échec.
                 $eqLogic->update(true);
+                /*
+                 * update() ne lève pas quand un calendrier est déjà en cache :
+                 * sans ce relais, un scénario appelant cette commande croirait
+                 * son calendrier relu alors que le service est en panne.
+                 */
+                if ($eqLogic->getRefreshError() != '') {
+                    throw new Exception($eqLogic->getRefreshError());
+                }
                 return true;
         }
         return true;

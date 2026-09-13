@@ -22,11 +22,13 @@
       try {
         payload = JSON.parse(_options.value)
       } catch (error) {
+        /* Commande jamais rafraîchie, ou valeur qui n'est pas du JSON : afficher
+           le texte brut plutôt qu'une tuile vide réduite à son titre. */
         payload = { label: _options.value, fractions: [] }
       }
       if (!isset(payload.fractions)) { payload.fractions = [] }
 
-      cmd.querySelector('.hygeabeDate').textContent = init(payload.label)
+      cmd.querySelector('.hygeabeDate').textContent = init(payload.label) || '-'
 
       var container = cmd.querySelector('.hygeabeFractions')
       container.innerHTML = ''

@@ -25,23 +25,17 @@ function hygeabe_update() {
 
 function hygeabe_remove() {
     /*
-     * Le jeton d'accès et la clé extraite du site sont en cache : les laisser
-     * derrière soi ferait repartir une réinstallation avec une clé peut-être
-     * périmée, sans moyen de le voir depuis l'interface.
+     * L'adresse du service est en cache pour une semaine : la laisser derrière
+     * soi ferait repartir une réinstallation sur une adresse peut-être périmée,
+     * sans moyen de le voir depuis l'interface. Les calendriers, eux, sont
+     * nettoyés équipement par équipement par hygeabe::preRemove().
      */
-    hygeabe_clearCache();
-}
-
-/* Vide le cache partagé du plugin (clé d'API, jeton, réponses). */
-function hygeabe_clearCache() {
-    foreach (array('secret', 'token') as $key) {
-        try {
-            $cache = cache::byKey('hygeabe::' . $key);
-            if (is_object($cache)) {
-                $cache->remove();
-            }
-        } catch (Throwable $e) {
-            log::add('hygeabe', 'debug', __('Nettoyage du cache impossible :', __FILE__) . ' ' . $e->getMessage());
+    try {
+        $cache = cache::byKey('hygeabe::apiBase');
+        if (is_object($cache)) {
+            $cache->remove();
         }
+    } catch (Throwable $e) {
+        log::add('hygeabe', 'debug', __('Nettoyage du cache impossible :', __FILE__) . ' ' . $e->getMessage());
     }
 }

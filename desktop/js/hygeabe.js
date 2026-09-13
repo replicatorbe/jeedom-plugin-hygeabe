@@ -17,7 +17,9 @@
 /* ================================================================ OUTILS */
 
 /* Requête AJAX vers le contrôleur du plugin.
-   _options : { button: <élément à désactiver pendant l'appel>, silent: true pour ne rien afficher } */
+   _options : { button: <élément à désactiver pendant l'appel>,
+                failure: <fonction recevant le message d'erreur>,
+                silent: true pour ne rien afficher } */
 function hygeabeAjax(_action, _data, _success, _options) {
   var options = _options || {}
   var button = isset(options.button) ? options.button : null
@@ -44,12 +46,20 @@ function hygeabeAjax(_action, _data, _success, _options) {
     noDisplayError: true,
     error: function (request, status, error) {
       release()
+      if (isset(options.failure)) {
+        options.failure('{{Jeedom n\'a pas répondu.}}')
+        return
+      }
       if (options.silent === true) { return }
       domUtils.handleAjaxError(request, status, error)
     },
     success: function (data) {
       release()
       if (data.state != 'ok') {
+        if (isset(options.failure)) {
+          options.failure(data.result)
+          return
+        }
         if (options.silent !== true) {
           jeedomUtils.showAlert({ message: data.result, level: 'danger' })
         }
@@ -68,6 +78,13 @@ function hygeabeCurrentId() {
     return null
   }
   return input.value
+}
+
+/* Identifiant affiché, sans alerte : sert à écarter la réponse d'un équipement
+   qu'on a quitté entre-temps. */
+function hygeabeDisplayedId() {
+  var input = document.querySelector('.eqLogicAttr[data-l1key="id"]')
+  return (input === null) ? '' : input.value
 }
 
 /* Les actions serveur travaillent sur les valeurs en base : refuse de partir
@@ -100,18 +117,40 @@ function hygeabeSetConfig(_key, _value) {
   if (input !== null) { input.value = _value }
 }
 
-/* Remplit un select à partir d'une liste [{id, name}], en présélectionnant _selectedId.
-   textContent et non innerHTML : les libellés viennent d'un service extérieur. */
-function hygeabeFillSelect(_select, _items, _selectedId) {
+/* Message affiché sous les boutons de test. */
+function hygeabeShowTestResult(_message, _level) {
+  var container = document.getElementById('span_hygeabeTestResult')
+  container.innerHTML = ''
+  if (_message === '') { return }
+  var box = document.createElement('div')
+  box.className = 'alert alert-' + _level
+  box.style.margin = '0'
+  /* textContent et non innerHTML : le message peut reprendre un libellé venu
+     d'un service extérieur. */
+  box.textContent = _message
+  container.appendChild(box)
+}
+
+/* ========================================================== LISTES DÉROULANTES */
+
+/*
+ * Remplit un select à partir d'une liste [{id, name}].
+ *
+ * La première option est toujours un repère vide : sans elle, le navigateur
+ * sélectionne d'office la première entrée réelle sans émettre « change », et
+ * l'utilisateur qui clique sur cette entrée-là ne déclencherait rien — son
+ * choix ne serait jamais enregistré.
+ */
+function hygeabeFillSelect(_select, _items, _selectedId, _placeholder) {
   _select.innerHTML = ''
-  if (_items.length === 0) {
-    var empty = document.createElement('option')
-    empty.value = ''
-    empty.textContent = '{{Aucun résultat}}'
-    _select.appendChild(empty)
-    return
-  }
+
+  var placeholder = document.createElement('option')
+  placeholder.value = ''
+  placeholder.textContent = (_items.length === 0) ? '{{Aucun résultat}}' : _placeholder
+  _select.appendChild(placeholder)
+
   for (var i = 0; i < _items.length; i++) {
+    /* textContent et non innerHTML : les libellés viennent d'un service extérieur. */
     var option = document.createElement('option')
     option.value = _items[i].id
     option.textContent = _items[i].name
@@ -120,28 +159,64 @@ function hygeabeFillSelect(_select, _items, _selectedId) {
   }
 }
 
+/*
+ * Recopie le choix de localité dans les champs enregistrés. Appelée aussi bien
+ * sur « change » qu'après chaque remplissage de la liste, pour que l'affichage
+ * et la valeur en base ne puissent jamais diverger.
+ */
+function hygeabeCommitZipcode(_select) {
+  var id = _select.value
+  if (hygeabeConfig('zipcode_id') === id) { return }
+
+  hygeabeSetConfig('zipcode_id', id)
+  hygeabeSetConfig('zipcode_label', (id === '') ? '' : _select.options[_select.selectedIndex].textContent)
+
+  /* Changer de localité invalide la rue : son identifiant n'a de sens que dans
+     la localité où il a été cherché. */
+  hygeabeSetConfig('street_id', '')
+  hygeabeSetConfig('street_label', '')
+  document.getElementById('in_hygeabeStreet').value = ''
+  hygeabeFillSelect(document.getElementById('sel_hygeabeStreet'), [], '', '{{Cherchez une rue}}')
+
+  hygeabeMarkModified()
+}
+
+function hygeabeCommitStreet(_select) {
+  var id = _select.value
+  if (hygeabeConfig('street_id') === id) { return }
+
+  hygeabeSetConfig('street_id', id)
+  hygeabeSetConfig('street_label', (id === '') ? '' : _select.options[_select.selectedIndex].textContent)
+  hygeabeMarkModified()
+}
+
 /* ============================================================ ÉQUIPEMENT */
 
 function printEqLogic(_eqLogic) {
   /* Le coeur ne réinitialise que les .eqLogicAttr : tout le reste de l'écran
      garderait sinon l'état de l'équipement précédemment ouvert. */
-  document.getElementById('span_hygeabeTestResult').innerHTML = ''
+  hygeabeShowTestResult('', 'info')
   document.getElementById('table_hygeabeCollections').querySelector('tbody').innerHTML = ''
   document.getElementById('span_hygeabeLastUpdate').textContent = '-'
 
+  var zipcodeId = hygeabeConfig('zipcode_id')
   var zipcodeLabel = hygeabeConfig('zipcode_label')
+  var streetId = hygeabeConfig('street_id')
   var streetLabel = hygeabeConfig('street_label')
   var houseNumber = hygeabeConfig('house_number')
 
   document.getElementById('in_hygeabeZipcode').value = zipcodeLabel.split(' ')[0] || ''
   document.getElementById('in_hygeabeStreet').value = streetLabel
-  document.getElementById('span_hygeabeAddress').textContent =
-    (streetLabel === '' && zipcodeLabel === '') ? '-' : (streetLabel + ' ' + houseNumber + ', ' + zipcodeLabel)
+
+  var address = []
+  if (streetLabel !== '') { address.push(streetLabel + ((houseNumber === '') ? '' : ' ' + houseNumber)) }
+  if (zipcodeLabel !== '') { address.push(zipcodeLabel) }
+  document.getElementById('span_hygeabeAddress').textContent = (address.length === 0) ? '-' : address.join(', ')
 
   hygeabeFillSelect(document.getElementById('sel_hygeabeZipcode'),
-    (zipcodeLabel === '') ? [] : [{ id: hygeabeConfig('zipcode_id'), name: zipcodeLabel }], hygeabeConfig('zipcode_id'))
+    (zipcodeId === '') ? [] : [{ id: zipcodeId, name: zipcodeLabel }], zipcodeId, '{{Cherchez un code postal}}')
   hygeabeFillSelect(document.getElementById('sel_hygeabeStreet'),
-    (streetLabel === '') ? [] : [{ id: hygeabeConfig('street_id'), name: streetLabel }], hygeabeConfig('street_id'))
+    (streetId === '') ? [] : [{ id: streetId, name: streetLabel }], streetId, '{{Cherchez une rue}}')
 
   if (isset(_eqLogic.id) && _eqLogic.id != '') {
     hygeabeLoadCollections(_eqLogic.id)
@@ -150,26 +225,40 @@ function printEqLogic(_eqLogic) {
 
 /* Remplit l'onglet Calendrier à partir du cache serveur, sans rappeler l'API. */
 function hygeabeLoadCollections(_id) {
+  var tbody = document.getElementById('table_hygeabeCollections').querySelector('tbody')
+
+  var message = function (_text) {
+    tbody.innerHTML = ''
+    var row = document.createElement('tr')
+    var cell = document.createElement('td')
+    cell.setAttribute('colspan', '3')
+    cell.textContent = _text
+    row.appendChild(cell)
+    tbody.appendChild(row)
+  }
+
   hygeabeAjax('collections', { id: _id }, function (result) {
-    var tbody = document.getElementById('table_hygeabeCollections').querySelector('tbody')
+    /* La réponse d'un équipement qu'on a quitté entre-temps remplirait le
+       calendrier de celui qu'on regarde maintenant. */
+    if (hygeabeDisplayedId() !== _id) { return }
+
     tbody.innerHTML = ''
     document.getElementById('span_hygeabeLastUpdate').textContent =
       (result.lastUpdate === '') ? '{{jamais}}' : result.lastUpdate
 
     if (result.collections.length === 0) {
-      var row = document.createElement('tr')
-      var cell = document.createElement('td')
-      cell.setAttribute('colspan', '3')
-      cell.textContent = '{{Aucune collecte connue. Vérifiez l\'adresse, puis cliquez sur « Rafraîchir maintenant ».}}'
-      row.appendChild(cell)
-      tbody.appendChild(row)
+      message('{{Aucune collecte connue. Vérifiez l\'adresse, puis cliquez sur « Rafraîchir maintenant ».}}')
       return
     }
-
     for (var i = 0; i < result.collections.length; i++) {
       tbody.appendChild(hygeabeCollectionRow(result.collections[i]))
     }
-  }, { silent: true })
+  }, {
+    failure: function () {
+      if (hygeabeDisplayedId() !== _id) { return }
+      message('{{Calendrier indisponible.}}')
+    }
+  })
 }
 
 /* Une ligne du calendrier. Construite en DOM : insertAdjacentHTML sur une table
@@ -196,10 +285,13 @@ function hygeabeCollectionRow(_collection) {
   for (var i = 0; i < _collection.fractions.length; i++) {
     var badge = document.createElement('span')
     badge.className = 'label'
-    badge.style.marginRight = '5px'
+    badge.style.display = 'inline-block'
+    badge.style.margin = '2px 4px 2px 0'
     badge.style.fontSize = '1em'
-    badge.style.backgroundColor = _collection.fractions[i].color
-    badge.style.color = '#fff'
+    badge.style.backgroundColor = _collection.fractions[i].color || '#777777'
+    /* La couleur de texte vient du service : le blanc d'office rendrait le
+       jaune des papiers-cartons illisible. */
+    badge.style.color = _collection.fractions[i].textColor || '#FFFFFF'
     badge.textContent = _collection.fractions[i].name
     fractionCell.appendChild(badge)
   }
@@ -258,6 +350,46 @@ function addCmdToTable(_cmd) {
   jeedom.cmd.changeType(newRow, init(_cmd.subType))
 }
 
+/* =============================================================== RECHERCHES */
+
+function hygeabeSearchZipcode(_button) {
+  var query = document.getElementById('in_hygeabeZipcode').value.trim()
+  if (query === '') {
+    jeedomUtils.showAlert({ message: '{{Saisissez d\'abord un code postal.}}', level: 'warning' })
+    return
+  }
+  hygeabeAjax('searchZipcode', { q: query }, function (result) {
+    var select = document.getElementById('sel_hygeabeZipcode')
+    hygeabeFillSelect(select, result, (result.length === 1) ? result[0].id : hygeabeConfig('zipcode_id'),
+      '{{Choisissez votre localité}}')
+    hygeabeCommitZipcode(select)
+    if (result.length > 1) {
+      jeedomUtils.showAlert({ message: '{{Plusieurs localités portent ce code postal, choisissez la vôtre.}}', level: 'info', timeOut: 6000 })
+    }
+  }, { button: _button })
+}
+
+function hygeabeSearchStreet(_button) {
+  if (hygeabeConfig('zipcode_id') === '') {
+    jeedomUtils.showAlert({ message: '{{Choisissez d\'abord la localité.}}', level: 'warning' })
+    return
+  }
+  var query = document.getElementById('in_hygeabeStreet').value.trim()
+  if (query === '') {
+    jeedomUtils.showAlert({ message: '{{Saisissez les premières lettres de la rue.}}', level: 'warning' })
+    return
+  }
+  hygeabeAjax('searchStreet', { q: query, zipcode: hygeabeConfig('zipcode_id') }, function (result) {
+    var select = document.getElementById('sel_hygeabeStreet')
+    hygeabeFillSelect(select, result, (result.length === 1) ? result[0].id : hygeabeConfig('street_id'),
+      '{{Choisissez votre rue}}')
+    hygeabeCommitStreet(select)
+    if (result.length > 1) {
+      jeedomUtils.showAlert({ message: '{{Plusieurs rues correspondent, choisissez la vôtre.}}', level: 'info', timeOut: 6000 })
+    }
+  }, { button: _button })
+}
+
 /* =============================================================== ÉCOUTEURS */
 
 /* Les écouteurs sont posés à la racine du script : les pages sont chargées en
@@ -267,23 +399,28 @@ var hygeabeContainer = document.getElementById('div_pageContainer') || document.
 
 hygeabeContainer.addEventListener('change', function (event) {
   if (event.target.closest('#sel_hygeabeZipcode')) {
-    var zipcode = event.target
-    hygeabeSetConfig('zipcode_id', zipcode.value)
-    hygeabeSetConfig('zipcode_label', zipcode.options[zipcode.selectedIndex].textContent)
-    /* Changer de localité invalide la rue : son identifiant n'a de sens que
-       dans la localité où il a été cherché. */
-    hygeabeSetConfig('street_id', '')
-    hygeabeSetConfig('street_label', '')
-    hygeabeFillSelect(document.getElementById('sel_hygeabeStreet'), [], '')
-    hygeabeMarkModified()
+    hygeabeCommitZipcode(event.target)
     return
   }
-
   if (event.target.closest('#sel_hygeabeStreet')) {
-    var street = event.target
-    hygeabeSetConfig('street_id', street.value)
-    hygeabeSetConfig('street_label', street.options[street.selectedIndex].textContent)
-    hygeabeMarkModified()
+    hygeabeCommitStreet(event.target)
+    return
+  }
+})
+
+/* Entrée dans un champ de recherche vaut clic sur la loupe : le formulaire
+   compte plusieurs champs, la touche n'y déclencherait rien d'autre. */
+hygeabeContainer.addEventListener('keydown', function (event) {
+  if (event.key !== 'Enter') { return }
+
+  if (event.target.closest('#in_hygeabeZipcode')) {
+    event.preventDefault()
+    hygeabeSearchZipcode(document.getElementById('bt_hygeabeSearchZipcode'))
+    return
+  }
+  if (event.target.closest('#in_hygeabeStreet')) {
+    event.preventDefault()
+    hygeabeSearchStreet(document.getElementById('bt_hygeabeSearchStreet'))
     return
   }
 })
@@ -293,61 +430,46 @@ hygeabeContainer.addEventListener('click', function (event) {
 
   if (target = event.target.closest('#bt_hygeabeSearchZipcode')) {
     if (target.classList.contains('disabled')) { return }
-    var query = document.getElementById('in_hygeabeZipcode').value.trim()
-    if (query === '') {
-      jeedomUtils.showAlert({ message: '{{Saisissez d\'abord un code postal.}}', level: 'warning' })
-      return
-    }
-    hygeabeAjax('searchZipcode', { q: query }, function (result) {
-      hygeabeFillSelect(document.getElementById('sel_hygeabeZipcode'), result, hygeabeConfig('zipcode_id'))
-      if (result.length === 1) {
-        hygeabeSetConfig('zipcode_id', result[0].id)
-        hygeabeSetConfig('zipcode_label', result[0].name)
-        hygeabeMarkModified()
-      } else if (result.length > 1) {
-        jeedomUtils.showAlert({ message: '{{Plusieurs localités portent ce code postal, choisissez la vôtre.}}', level: 'info', timeOut: 6000 })
-      }
-    }, { button: target })
+    hygeabeSearchZipcode(target)
     return
   }
 
   if (target = event.target.closest('#bt_hygeabeSearchStreet')) {
     if (target.classList.contains('disabled')) { return }
-    if (hygeabeConfig('zipcode_id') === '') {
-      jeedomUtils.showAlert({ message: '{{Choisissez d\'abord la localité.}}', level: 'warning' })
-      return
-    }
-    var street = document.getElementById('in_hygeabeStreet').value.trim()
-    if (street === '') {
-      jeedomUtils.showAlert({ message: '{{Saisissez les premières lettres de la rue.}}', level: 'warning' })
-      return
-    }
-    hygeabeAjax('searchStreet', { q: street, zipcode: hygeabeConfig('zipcode_id') }, function (result) {
-      hygeabeFillSelect(document.getElementById('sel_hygeabeStreet'), result, hygeabeConfig('street_id'))
-      if (result.length === 1) {
-        hygeabeSetConfig('street_id', result[0].id)
-        hygeabeSetConfig('street_label', result[0].name)
-        hygeabeMarkModified()
-      }
-    }, { button: target })
+    hygeabeSearchStreet(target)
     return
   }
 
   if (target = event.target.closest('#bt_hygeabeTestAddress')) {
     if (target.classList.contains('disabled')) { return }
-    var result = document.getElementById('span_hygeabeTestResult')
-    result.innerHTML = ''
+    hygeabeShowTestResult('', 'info')
+
+    /* Dire lequel des trois manque, plutôt que de laisser le serveur répondre
+       « renseignez tout » : le champ a souvent l'air rempli alors que le choix
+       dans la liste n'a pas été fait. */
+    if (hygeabeConfig('zipcode_id') === '') {
+      hygeabeShowTestResult('{{Choisissez la localité dans la liste.}}', 'warning')
+      return
+    }
+    if (hygeabeConfig('street_id') === '') {
+      hygeabeShowTestResult('{{Choisissez la rue dans la liste.}}', 'warning')
+      return
+    }
+    if (hygeabeConfig('house_number') === '') {
+      hygeabeShowTestResult('{{Indiquez le numéro de maison.}}', 'warning')
+      return
+    }
+
     hygeabeAjax('testAddress', {
       zipcode: hygeabeConfig('zipcode_id'),
       street: hygeabeConfig('street_id'),
       number: hygeabeConfig('house_number')
     }, function (data) {
-      var box = document.createElement('div')
-      box.className = 'alert alert-success'
-      box.style.margin = '0'
-      box.textContent = data.summary
-      result.appendChild(box)
-    }, { button: target })
+      hygeabeShowTestResult(data.summary, 'success')
+    }, {
+      button: target,
+      failure: function (message) { hygeabeShowTestResult(message, 'danger') }
+    })
     return
   }
 

@@ -42,7 +42,7 @@ Plugins → Gestion des plugins → Ajouter → Github.
 
 | Champ | Valeur |
 |---|---|
-| Nom du plugin | `hygeabe` |
+| ID logique du plugin | `hygeabe` |
 | Utilisateur | `replicatorbe` |
 | Dépôt | `jeedom-plugin-hygeabe` |
 | Branche | `master` pour la version stable, `beta` pour la version de développement |
@@ -66,7 +66,7 @@ cron horaire ─┬─ calendrier en cache de moins de 20 h ? ─── non ─�
                                           (« demain » change à minuit)
 ```
 
-Le calendrier est relu une fois par jour au maximum ; les commandes, elles, sont
+Le calendrier est relu au plus une fois toutes les 20 heures ; les commandes, elles, sont
 recalculées à chaque heure sans appel réseau. Le dernier calendrier connu
 survit à une panne du service.
 

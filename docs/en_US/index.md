@@ -25,7 +25,7 @@ Plugins → Organization → Hygea → **Add an address**.
 
 | Field | Value |
 |---|---|
-| Name | anything you like, for example `Home` |
+| Name | anything you like, for example `Collections` |
 | Postal code | type it, then click the magnifier |
 | Locality | pick it from the list |
 | Street | type the first letters, click the magnifier, pick it |
@@ -90,15 +90,15 @@ out:
 
 ```
 Trigger: schedule, 0 20 * * *
-If: #[Home][Hygea][Collection tomorrow]# == 1
+If: #[Home][Collections][Collection tomorrow]# == 1
 Then: message::notification with
-      "To take out tonight: " + #[Home][Hygea][Waste to take out tonight]#
+      "To take out tonight: " + #[Home][Collections][Waste to take out tonight]#
 ```
 
 Announcing only the blue bag:
 
 ```
-If: #[Home][Hygea][PMD : tomorrow]# == 1
+If: #[Home][Collections][PMD : tomorrow]# == 1
 ```
 
 ## Plugin configuration
@@ -111,7 +111,7 @@ If: #[Home][Hygea][PMD : tomorrow]# == 1
 
 ## Call frequency
 
-The plugin reads the calendar **at most once a day**, and recomputes its commands
+The plugin reads the calendar **at most every 20 hours**, and recomputes its commands
 every hour without touching the network. The terms of use of the service ask for
 reasonable usage: avoid piling up manual refreshes or scenarios calling the
 "Refresh" command.
@@ -121,7 +121,7 @@ message appears in the message centre. Nothing is erased.
 
 ## Troubleshooting
 
-Logs are under Analysis → History, log `hygeabe`.
+Logs are under Analysis → Logs, log `hygeabe`.
 
 | Symptom | Likely cause |
 |---|---|
