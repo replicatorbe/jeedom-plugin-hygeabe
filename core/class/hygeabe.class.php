@@ -440,8 +440,15 @@ class hygeabe extends eqLogic {
 
         $collections = array();
         foreach ($dates as $date => $fractions) {
+            /* Ordre alphabétique plutôt que l'ordre de réponse du service : une
+               permutation d'un appel à l'autre réécrirait la commande et
+               peuplerait l'historique de faux changements. */
+            uasort($fractions, function ($_a, $_b) {
+                return strcasecmp($_a['name'], $_b['name']);
+            });
             $collections[] = array('date' => $date, 'fractions' => array_values($fractions));
         }
+        ksort($seen);
         return array('collections' => $collections, 'fractions' => $seen);
     }
 
