@@ -34,8 +34,22 @@ class hygeabe extends eqLogic {
 
     /* Un calendrier de collecte ne bouge pratiquement jamais : une lecture par
      * jour suffit, et les conditions d'utilisation du service demandent de ne
-     * pas le solliciter davantage. */
-    const CALENDAR_TTL = 72000;
+     * pas le solliciter davantage.
+     *
+     * 23 h et non 24 : le cron est horaire et le test porte sur un âge
+     * strictement supérieur, si bien qu'une échéance de 24 h ne tombe jamais
+     * pile et recule d'une heure par jour. 23 h fixe la lecture à l'heure de la
+     * première, une fois pour toutes. */
+    const CALENDAR_TTL = 82800;
+
+    /* Un forçage ne relit pas un calendrier tout frais : sans ce plancher, un
+     * scénario appelant la commande « Rafraîchir » chaque minute émettrait
+     * près de trois mille appels par jour. */
+    const FORCE_MIN_INTERVAL = 300;
+
+    /* Après un échec, on laisse le service tranquille : c'est au moment où il
+     * va le plus mal qu'il ne faut pas le marteler d'heure en heure. */
+    const RETRY_DELAY = 10800;
 
     /* Valeur d'une commande « jours restants » quand la date est inconnue. Une
      * chaîne vide serait convertie en 0 par le coeur, c'est-à-dire « collecte
@@ -133,7 +147,14 @@ class hygeabe extends eqLogic {
             return;
         }
         try {
-            $this->update(true);
+            /*
+             * Forcer la lecture à chaque enregistrement ferait deux appels au
+             * service pour un simple changement de nom ou d'icône. Seule une
+             * adresse différente justifie de tout relire.
+             */
+            $calendar = $this->getCalendar();
+            $changed = !isset($calendar['address']) || $calendar['address'] !== $this->addressSignature();
+            $this->update($changed);
         } catch (Throwable $e) {
             // L'enregistrement ne doit pas échouer parce que le service est
             // indisponible : l'adresse est valide, le cron réessaiera.
@@ -307,6 +328,18 @@ class hygeabe extends eqLogic {
         return 'hygeabe::calendar::' . $this->getId();
     }
 
+    /* Clé posée après un échec, qui expire d'elle-même : tant qu'elle existe, on
+     * ne retente pas. */
+    private function retryKey() {
+        return 'hygeabe::retry::' . $this->getId();
+    }
+
+    /* De quoi reconnaître que l'adresse a changé. */
+    private function addressSignature() {
+        return $this->getConfiguration('zipcode_id') . '|' . $this->getConfiguration('street_id')
+             . '|' . $this->getConfiguration('house_number');
+    }
+
     private function clearCalendar() {
         cache::delete($this->cacheKey());
     }
@@ -337,13 +370,33 @@ class hygeabe extends eqLogic {
         }
 
         $calendar = $this->getCalendar();
-        $stale = !isset($calendar['fetchedAt']) || (time() - (int) $calendar['fetchedAt']) > self::CALENDAR_TTL;
+        $age = isset($calendar['fetchedAt']) ? (time() - (int) $calendar['fetchedAt']) : PHP_INT_MAX;
 
-        if ($_force || $stale) {
+        if ($_force && $age <= self::FORCE_MIN_INTERVAL) {
+            // Le calendrier a moins de cinq minutes : le relire n'apprendrait rien.
+            $_force = false;
+        }
+        $waiting = (cache::byKey($this->retryKey())->getValue('') !== '');
+
+        if ($_force || ($age > self::CALENDAR_TTL && !$waiting)) {
             try {
-                $calendar = $this->fetchCalendar();
-                cache::set($this->cacheKey(), json_encode($calendar), 0);
-                $this->clearProblem();
+                $fresh = $this->fetchCalendar($calendar);
+
+                if (count($fresh['collections']) == 0 && isset($calendar['collections']) && count($calendar['collections']) > 0) {
+                    /*
+                     * Le service a répondu, mais sans aucune collecte. Cela arrive
+                     * quand l'intercommunale n'a pas encore publié l'année
+                     * suivante. Écraser un calendrier valide ferait disparaître la
+                     * prochaine collecte du dashboard sans la moindre explication.
+                     */
+                    $this->reportProblem(__('Le service ne publie plus de collecte pour cette adresse ; le calendrier précédent reste affiché.', __FILE__));
+                    cache::set($this->retryKey(), time(), self::RETRY_DELAY);
+                } else {
+                    $calendar = $fresh;
+                    cache::set($this->cacheKey(), json_encode($calendar), 0);
+                    cache::delete($this->retryKey());
+                    $this->clearProblem();
+                }
             } catch (Throwable $e) {
                 /*
                  * Le calendrier déjà connu reste affiché : une panne du service ne
@@ -352,6 +405,7 @@ class hygeabe extends eqLogic {
                  */
                 $this->_refreshError = $e->getMessage();
                 $this->reportProblem($e->getMessage());
+                cache::set($this->retryKey(), time(), self::RETRY_DELAY);
                 if (empty($calendar)) {
                     throw $e;
                 }
@@ -362,6 +416,7 @@ class hygeabe extends eqLogic {
         return $calendar;
     }
 
+
     /* Ce qui a empêché la dernière lecture, ou une chaîne vide si tout s'est
      * bien passé. Le contrôleur ajax s'en sert pour ne pas annoncer un succès
      * là où rien n'a été relu. */
@@ -371,7 +426,7 @@ class hygeabe extends eqLogic {
 
     /* Interroge le service et range le calendrier par date. */
     /* Interroge le service et range le calendrier par date. */
-    private function fetchCalendar() {
+    private function fetchCalendar($_previous = array()) {
         $from  = new DateTimeImmutable('today', self::timezone());
         $until = $from->modify('+' . max(7, (int) config::byKey('days_ahead', __CLASS__, 60)) . ' days');
 
@@ -385,9 +440,17 @@ class hygeabe extends eqLogic {
 
         $parsed = self::parseCollections($items);
 
+        /* Le nom de l'intercommunale ne change jamais pour une adresse donnée :
+         * le redemander à chaque lecture doublerait le trafic pour rien. */
+        $operator = isset($_previous['operator']) ? $_previous['operator'] : '';
+        if ($operator == '') {
+            $operator = $this->fetchOperator();
+        }
+
         return array(
             'fetchedAt'   => time(),
-            'operator'    => $this->fetchOperator(),
+            'address'     => $this->addressSignature(),
+            'operator'    => $operator,
             'collections' => $parsed['collections'],
             'fractions'   => $parsed['fractions'],
         );
@@ -521,16 +584,16 @@ class hygeabe extends eqLogic {
         }
 
         if ($next === null) {
-            $this->checkAndUpdateCmd('next', json_encode(array('label' => __('Aucune collecte connue', __FILE__), 'fractions' => array())));
-            $this->checkAndUpdateCmd('summary', __('Aucune collecte connue', __FILE__));
-            $this->checkAndUpdateCmd('next_date', '');
-            $this->checkAndUpdateCmd('next_fractions', '');
+            $this->setCmd('next', json_encode(array('label' => __('Aucune collecte connue', __FILE__), 'fractions' => array())));
+            $this->setCmd('summary', __('Aucune collecte connue', __FILE__));
+            $this->setCmd('next_date', '');
+            $this->setCmd('next_fractions', '');
             /*
              * -1 et non la chaîne vide : le coeur convertit une valeur vide en 0
              * sur une commande numérique, c'est-à-dire exactement « collecte
              * aujourd'hui ». Un scénario se déclencherait tous les jours.
              */
-            $this->checkAndUpdateCmd('next_days', self::UNKNOWN_DAYS);
+            $this->setCmd('next_days', self::UNKNOWN_DAYS);
         } else {
             $names = array();
             $badges = array();
@@ -539,17 +602,17 @@ class hygeabe extends eqLogic {
                 $badges[] = array('name' => $fraction['name'], 'color' => $fraction['color'], 'text' => $fraction['textColor']);
             }
             $label = self::humanDate($next['date'], $next['days']);
-            $this->checkAndUpdateCmd('next', json_encode(array('label' => $label, 'fractions' => $badges)));
-            $this->checkAndUpdateCmd('summary', $label . ' : ' . implode(', ', $names));
-            $this->checkAndUpdateCmd('next_date', $next['date']);
-            $this->checkAndUpdateCmd('next_fractions', implode(', ', $names));
-            $this->checkAndUpdateCmd('next_days', $next['days']);
+            $this->setCmd('next', json_encode(array('label' => $label, 'fractions' => $badges)));
+            $this->setCmd('summary', $label . ' : ' . implode(', ', $names));
+            $this->setCmd('next_date', $next['date']);
+            $this->setCmd('next_fractions', implode(', ', $names));
+            $this->setCmd('next_days', $next['days']);
         }
 
-        $this->checkAndUpdateCmd('today', ($today_collection !== null) ? 1 : 0);
-        $this->checkAndUpdateCmd('tomorrow', ($tomorrow !== null) ? 1 : 0);
-        $this->checkAndUpdateCmd('tomorrow_fractions', ($tomorrow === null) ? '' : implode(', ', array_column($tomorrow['fractions'], 'name')));
-        $this->checkAndUpdateCmd('operator', isset($_calendar['operator']) ? $_calendar['operator'] : '');
+        $this->setCmd('today', ($today_collection !== null) ? 1 : 0);
+        $this->setCmd('tomorrow', ($tomorrow !== null) ? 1 : 0);
+        $this->setCmd('tomorrow_fractions', ($tomorrow === null) ? '' : implode(', ', array_column($tomorrow['fractions'], 'name')));
+        $this->setCmd('operator', isset($_calendar['operator']) ? $_calendar['operator'] : '');
 
         $this->refreshFractionCommands($collections, $today, $passed, isset($_calendar['fractions']) ? $_calendar['fractions'] : array());
     }
@@ -586,12 +649,30 @@ class hygeabe extends eqLogic {
                 $days = $remaining;
                 break;
             }
-            $this->checkAndUpdateCmd('fraction::' . $slug . '::date', $date);
-            $this->checkAndUpdateCmd('fraction::' . $slug . '::days', $days);
-            $this->checkAndUpdateCmd('fraction::' . $slug . '::tomorrow', ($days === 1) ? 1 : 0);
+            $this->setCmd('fraction::' . $slug . '::date', $date);
+            $this->setCmd('fraction::' . $slug . '::days', $days);
+            $this->setCmd('fraction::' . $slug . '::tomorrow', ($days === 1) ? 1 : 0);
         }
     }
 
+
+    /*
+     * Écrit une commande, sauf quand elle est déjà vide et le reste. Le coeur
+     * traite « valeur vide » comme un changement systématique
+     * (eqLogic::checkAndUpdateCmd) : sans ce filtre, une commande vide six jours
+     * sur sept — « Déchets à sortir ce soir » — émettrait un évènement toutes les
+     * heures et déclencherait vingt-quatre fois par jour le scénario qui
+     * l'écoute.
+     */
+    private function setCmd($_logicalId, $_value) {
+        if ($_value === '') {
+            $cmd = $this->getCmd(null, $_logicalId);
+            if (is_object($cmd) && $cmd->execCmd() === '') {
+                return;
+            }
+        }
+        $this->checkAndUpdateCmd($_logicalId, $_value);
+    }
 
     /* ================================================================= MESSAGES */
 
@@ -713,13 +794,16 @@ class hygeabe extends eqLogic {
             if (isset($decoded['API']) && strpos($decoded['API'], 'https://') === 0) {
                 $base = rtrim($decoded['API'], '/');
                 cache::set('hygeabe::apiBase', $base, 604800);
+            } else {
+                /*
+                 * Le site n'a pas répondu : l'adresse par défaut n'est retenue que
+                 * quelques minutes. Assez pour qu'une tentative en panne ne
+                 * redemande pas trois fois le même fichier, trop peu pour
+                 * neutraliser la réparation automatique le jour où l'API déménage
+                 * pendant que recycleapp.be est indisponible.
+                 */
+                cache::set('hygeabe::apiBase', $base, 300);
             }
-            /*
-             * Rien n'est mis en cache si le site n'a pas répondu : figer
-             * l'adresse par défaut pour une semaine neutraliserait justement la
-             * réparation automatique le jour où l'API déménage pendant que
-             * recycleapp.be est indisponible.
-             */
         }
         return $base . self::API_PATH;
     }
@@ -965,7 +1049,12 @@ class hygeabeCmd extends cmd {
 
         switch ($this->getLogicalId()) {
             case 'refresh':
-                $eqLogic->update(true);
+                /*
+                 * Pas de forçage : un scénario qui appellerait cette commande en
+                 * boucle contournerait la politique d'une lecture par jour. Les
+                 * commandes sont recomposées, et le calendrier relu s'il a vieilli.
+                 */
+                $eqLogic->update();
                 /*
                  * update() ne lève pas quand un calendrier est déjà en cache :
                  * sans ce relais, un scénario appelant cette commande croirait

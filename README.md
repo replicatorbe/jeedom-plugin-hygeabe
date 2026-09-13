@@ -57,7 +57,7 @@ Plugins → Gestion des plugins → Ajouter → Github.
 ## Architecture
 
 ```
-cron horaire ─┬─ calendrier en cache de moins de 20 h ? ─── non ──┐
+cron horaire ─┬─ calendrier en cache de moins de 23 h ? ─── non ──┐
               │                                                   │
               │                                            api.fostplus.be
               │                                             /public/v1
@@ -66,9 +66,10 @@ cron horaire ─┬─ calendrier en cache de moins de 20 h ? ─── non ─�
                                           (« demain » change à minuit)
 ```
 
-Le calendrier est relu au plus une fois toutes les 20 heures ; les commandes, elles, sont
-recalculées à chaque heure sans appel réseau. Le dernier calendrier connu
-survit à une panne du service.
+Le calendrier est relu une fois par jour ; les commandes, elles, sont recalculées
+à chaque heure sans appel réseau. Le dernier calendrier connu survit à une panne
+du service comme à une réponse vide, et le plugin attend trois heures avant de
+réessayer après un échec.
 
 ## Documentation
 

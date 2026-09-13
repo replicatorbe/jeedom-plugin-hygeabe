@@ -65,7 +65,7 @@ coupées en deux tronçons. Le numéro départage.
 | Collecte demain | info / binary | la commande à surveiller pour être prévenu la veille au soir |
 | Déchets à sortir ce soir | info / string | les fractions de la collecte de demain, vide s'il n'y en a pas |
 | Intercommunale | info / string | `HYGEA`, `TIBI`... le nom renvoyé par le service |
-| Rafraîchir | action | relit le calendrier immédiatement |
+| Rafraîchir | action | recalcule les commandes, et relit le calendrier s'il a vieilli |
 
 Avec l'option « commandes par fraction », chaque type de déchet ajoute :
 
@@ -118,14 +118,27 @@ Si : #[Maison][Collectes][Jours avant la prochaine collecte]# == 0
 
 ## Fréquence des appels
 
-Le plugin relit le calendrier **au plus une fois toutes les 20 heures**, et recalcule ses
-commandes toutes les heures sans toucher au réseau. Les conditions d'utilisation
-du service demandent un usage raisonnable : évitez de multiplier les
-rafraîchissements manuels ou les scénarios qui appellent la commande
-« Rafraîchir ».
+Le plugin relit le calendrier **une fois par jour**, et recalcule ses commandes
+toutes les heures sans toucher au réseau. Les conditions d'utilisation du service
+demandent un usage raisonnable, et le plugin s'y tient tout seul :
+
+- la commande d'action « Rafraîchir » ne force **pas** de lecture réseau. Un
+  scénario qui l'appellerait en boucle ne ferait que recomposer les commandes ;
+  seul le bouton « Rafraîchir maintenant » de la page du plugin force une
+  lecture, et pas plus d'une toutes les cinq minutes ;
+- après un échec, le plugin attend trois heures avant de réessayer, au lieu de
+  marteler un service déjà en difficulté ;
+- enregistrer l'équipement ne relit le calendrier que si l'adresse a changé.
 
 Quand le service est indisponible, le dernier calendrier connu reste affiché et
-un message apparaît dans le centre de messages. Rien n'est effacé.
+un message apparaît dans le centre de messages. Rien n'est effacé. Il en va de
+même si le service répond sans aucune collecte — ce qui arrive quand
+l'intercommunale n'a pas encore publié l'année suivante : le calendrier
+précédent est conservé plutôt qu'écrasé par du vide.
+
+Le recalcul horaire dépend du cron du coeur, partagé par tous les plugins : un
+autre plugin anormalement lent peut faire sauter une heure. Sans conséquence
+ici, le passage suivant rattrape.
 
 ## En cas de problème
 

@@ -64,7 +64,7 @@ sections. The house number tells them apart.
 | Collection tomorrow | info / binary | the command to watch to be reminded the evening before |
 | Waste to take out tonight | info / string | tomorrow's waste types, empty if there is none |
 | Operator | info / string | `HYGEA`, `TIBI`... the name returned by the service |
-| Refresh | action | reads the calendar again right away |
+| Refresh | action | recomputes the commands, and reads the calendar again if it has aged |
 
 With the "commands per waste type" option, each waste type adds:
 
@@ -111,13 +111,27 @@ If: #[Home][Collections][PMD : tomorrow]# == 1
 
 ## Call frequency
 
-The plugin reads the calendar **at most every 20 hours**, and recomputes its commands
-every hour without touching the network. The terms of use of the service ask for
-reasonable usage: avoid piling up manual refreshes or scenarios calling the
-"Refresh" command.
+The plugin reads the calendar **once a day**, and recomputes its commands every
+hour without touching the network. The terms of use of the service ask for
+reasonable usage, and the plugin keeps to them on its own:
+
+- the "Refresh" action command does **not** force a network read. A scenario
+  calling it in a loop only recomputes the commands; only the "Refresh now"
+  button on the plugin page forces a read, and no more than once every five
+  minutes;
+- after a failure, the plugin waits three hours before trying again, instead of
+  hammering a service already in trouble;
+- saving the device only reads the calendar again if the address has changed.
 
 When the service is unavailable, the last known calendar stays displayed and a
-message appears in the message centre. Nothing is erased.
+message appears in the message centre. Nothing is erased. The same goes when the
+service answers with no collection at all — which happens when the operator has
+not published next year yet: the previous calendar is kept rather than
+overwritten with emptiness.
+
+The hourly recomputation relies on the core cron, shared by every plugin:
+another abnormally slow plugin can make it miss an hour. Without consequence
+here, the next pass catches up.
 
 ## Troubleshooting
 
