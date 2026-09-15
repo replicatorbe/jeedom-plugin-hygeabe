@@ -97,11 +97,30 @@ try {
             );
         }
 
+        /* Les déchets desservis à l'adresse alimentent le filtre d'un rappel. Ils
+         * viennent du calendrier et non des collectes affichées : les sapins et
+         * les encombrants ne passent qu'une fois l'an, et un rappel doit pouvoir
+         * les viser hors saison. */
+        $fractions = array();
+        foreach (isset($calendar['fractions']) ? $calendar['fractions'] : array() as $slug => $fraction) {
+            $fractions[] = array('slug' => $slug, 'name' => $fraction['name']);
+        }
+
         ajax::success(array(
             'lastUpdate'  => isset($calendar['fetchedAt']) ? date('d/m/Y H:i', $calendar['fetchedAt']) : '',
             'operator'    => isset($calendar['operator']) ? $calendar['operator'] : '',
             'collections' => $collections,
+            'fractions'   => $fractions,
+            /* Ce que chaque rappel enregistré enverra, et quand : un rappel mal
+             * réglé ne lève aucune erreur, il ne part jamais. */
+            'reminders'   => $eqLogic->nextReminders(),
         ));
+    }
+
+    if (init('action') == 'testReminder') {
+        unautorizedInDemo();
+        $eqLogic = $getHygeabe(init('id'));
+        ajax::success(array('summary' => $eqLogic->testReminder(init('reminder'))));
     }
 
     throw new Exception(__('Aucune méthode correspondante à :', __FILE__) . ' ' . init('action'));

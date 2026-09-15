@@ -8,6 +8,10 @@ It works for Hygea, but also for every other Belgian operator publishing on the
 same service: the plugin reads the actual operator of the address and displays
 it.
 
+It can also **remind you on its own**: a reminder set on the device triggers the
+notification, the SMS or the lamp of your choice a few hours before the
+collection, with no scenario to write.
+
 No dependency, no daemon, no account to create. The calendar is read once a day,
 the commands are recomputed every hour.
 
@@ -111,7 +115,93 @@ To display another command, make it visible from the Commands tab. Binary
 commands use a plugin widget showing an orange bin when true, a discreet dash
 otherwise.
 
+## Reminders
+
+The **Reminders** tab of an address lets you be warned without writing a single
+scenario. A reminder says three things: **when**, **for which waste**, and
+**what it triggers**.
+
+| Setting | Role |
+|---|---|
+| Active | unticking suspends the reminder without deleting it |
+| When | `on the day itself`, `the day before`, up to `a week before`, and the time |
+| Waste concerned | nothing selected: the reminder fires for any collection. One or more types: it only fires for those |
+| Actions | one or more action commands of your Jeedom — notification, SMS, spoken message, lamp — or a block (message, scenario, variable) |
+
+Several reminders can live on the same address: "the day before at 7 pm for
+everything", "on the day at 6:30 am for bulky items", "on the day at 7 pm as a
+nudge to bring the bins back in".
+
+The action selector is the one used by scenarios: the *Title* and *Message*
+fields that appear on the right belong to the chosen command and are drawn by
+Jeedom itself. A reminder matching no waste of the collection stays silent.
+
+### Message tokens
+
+Usable in the title as well as in the message:
+
+| Token | Gives |
+|---|---|
+| `#dechets#` | `PMD, Paper and cardboard` — a filtered reminder only names the waste it watches |
+| `#collecte#` | `today`, `tomorrow`, or `Thursday 17/09` beyond that |
+| `#jour#` | `Thursday 17/09`, always |
+| `#jours#` | the number of days before the collection |
+| `#adresse#` | the address of the device |
+| `#equipement#` | the name of the device |
+| `#intercommunale#` | the operator serving the address |
+
+Jeedom's own tokens keep working on top: `#[Object][Device][Command]#`,
+`variable()`, and so on.
+
+A common message:
+
+```
+Take out tonight: #dechets#
+```
+
+### Checking that a reminder is set right
+
+A badly set reminder raises no error: it simply never fires. Two safeguards:
+
+- under each reminder, **Next send** announces the date, the time and the waste
+  of the next departure, according to the **saved** configuration;
+- the **Test** button plays the reminder right now, on the next matching
+  collection. It really sends — that is the point — and does not consume the
+  evening's reminder.
+
+If an action fails, the message appears in the message centre and in the
+`hygeabe` log. It clears itself on the first reminder that goes through.
+
+### When reminders fire
+
+The plugin looks at its reminders every five minutes, without ever querying the
+service: it works on the calendar already in memory. A reminder set at 7:00 pm
+therefore fires between 7:00 pm and 7:05 pm.
+
+If Jeedom was off at the due time, the reminder still fires on start-up as long
+as it is no more than **two hours** late. Beyond that it stays silent:
+announcing at midnight a bin to be taken out the previous evening helps nobody.
+
+Saving a reminder does not make it fire for a due time already gone: that catch
+up is for a powered-off box, not for a reminder just written. The **Test** button
+is there for that.
+
+### What a reminder action cannot be
+
+Actions are played inside the core cron, shared by every plugin: a slow action —
+a notification to a service that stopped answering — holds everyone for the
+length of its timeout. The second box to the left of an action runs it in
+parallel; in exchange, its failure is no longer reported.
+
+For the same reason five blocks are refused: **Wait**, **Pause**, **Ask**,
+**Report** and **Export history**, which hold the cron for seconds or minutes.
+So are those that only make sense inside a scenario: **Stop**, **Add a log**,
+**Return a text**, **Icon**, **Tag**.
+
 ## Using it in a scenario
+
+Info commands remain there for everything reminders do not cover: a particular
+condition, a chain of actions, a schedule that depends on something else.
 
 Being reminded the evening before, at 8 pm, only if there is something to take
 out:
@@ -134,7 +224,7 @@ If: #[Home][Collections][PMD : tomorrow]# == 1
 | Setting | Role |
 |---|---|
 | Request timeout | seconds before giving up on a call. 10 by default |
-| Calendar horizon | number of days requested on each read. 60 by default |
+| Calendar horizon | number of days requested on each read. 60 by default, never under 14: a reminder set "a week before" must know its collection well before it happens |
 | Label language | language in which the service returns waste type names |
 
 ## Call frequency
@@ -157,6 +247,9 @@ service answers with no collection at all — which happens when the operator ha
 not published next year yet: the previous calendar is kept rather than
 overwritten with emptiness.
 
+Looking at the reminders every five minutes adds nothing to that count: it
+happens on the calendar already in memory, without a single request.
+
 The hourly recomputation relies on the core cron, shared by every plugin:
 another abnormally slow plugin can make it miss an hour. Without consequence
 here, the next pass catches up.
@@ -172,3 +265,7 @@ Logs are under Analysis → Logs, log `hygeabe`.
 | No collection although the address is valid | next year's calendar is not published yet, or the house number is wrong |
 | The calendar stops at the end of December | normal: operators publish the following year at different dates |
 | "The collection service is not answering" | outage or network cut; the plugin retries on the next cron |
+| A reminder does not fire | look at the "Next send" line under the reminder: it says whether it is disabled, has no action, or matches no known collection. The "Test" button settles the rest |
+| A reminder fires but nothing arrives | the action failed: the message centre and the `hygeabe` log name the faulty command and the reason |
+| "block unusable in a reminder" | the action points at a block that would hold up Jeedom's cron, or that only makes sense inside a scenario; use a scenario instead |
+| A reminder fired late | Jeedom was off at the due time; it catches up for up to two hours, no further |
