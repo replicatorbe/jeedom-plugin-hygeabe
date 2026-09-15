@@ -1,10 +1,10 @@
 {
     "id": "hygeabe",
     "name": "Hygea",
-    "pluginVersion": "0.4",
+    "pluginVersion": "0.5",
     "description": {
-        "fr_FR": "Calendrier des collectes de déchets Hygea et des autres intercommunales belges publiant sur Recycle! (recycleapp.be). Renseignez code postal, rue et numéro : le plugin interroge l'API, affiche la prochaine collecte avec les fractions concernées (déchets organiques, PMC, papiers-cartons, déchets résiduels, encombrants) et fournit des commandes info exploitables en scénario pour être prévenu la veille de sortir les bonnes poubelles.",
-        "en_US": "Waste collection calendar for Hygea and the other Belgian operators publishing on Recycle! (recycleapp.be). Enter postal code, street and house number: the plugin queries the API, shows the next collection with its fractions (organic waste, PMD, paper and cardboard, residual waste, bulky items) and exposes info commands usable in scenarios to be reminded the evening before to take the right bins out."
+        "fr_FR": "Calendrier des collectes de déchets Hygea et des autres intercommunales belges publiant sur Recycle! (recycleapp.be). Renseignez code postal, rue et numéro : le plugin interroge l'API, affiche la prochaine collecte avec les fractions concernées (déchets organiques, PMC, papiers-cartons, déchets résiduels, encombrants), fournit des commandes info exploitables en scénario, et déclenche lui-même les rappels de votre choix — notification, SMS, message vocal — quelques heures avant la collecte.",
+        "en_US": "Waste collection calendar for Hygea and the other Belgian operators publishing on Recycle! (recycleapp.be). Enter postal code, street and house number: the plugin queries the API, shows the next collection with its fractions (organic waste, PMD, paper and cardboard, residual waste, bulky items), exposes info commands usable in scenarios, and fires the reminders of your choice — notification, SMS, spoken message — a few hours before the collection."
     },
     "licence": "AGPL",
     "author": "sMug (Jérôme Fafchamps)",

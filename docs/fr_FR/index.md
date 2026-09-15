@@ -9,6 +9,10 @@ Il fonctionne pour Hygea, mais aussi pour toutes les autres intercommunales
 belges qui publient sur le même service : le plugin lit l'opérateur réel de
 l'adresse et l'affiche.
 
+Il sait aussi **prévenir tout seul** : un rappel réglé dans l'équipement
+déclenche la notification, le SMS ou la lampe de votre choix quelques heures
+avant la collecte, sans qu'il y ait de scénario à écrire.
+
 Aucune dépendance, aucun démon, aucun compte à créer. Le calendrier est relu une
 fois par jour, les commandes sont recalculées toutes les heures.
 
@@ -112,7 +116,96 @@ Pour afficher une autre commande, rendez-la visible depuis l'onglet Commandes.
 Les commandes binaires utilisent un widget du plugin qui montre une poubelle
 orange quand c'est vrai, un tiret discret sinon.
 
+## Rappels
+
+L'onglet **Rappels** d'une adresse permet d'être prévenu sans écrire le moindre
+scénario. Un rappel dit trois choses : **quand**, **pour quels déchets**, et
+**ce qu'il déclenche**.
+
+| Réglage | Rôle |
+|---|---|
+| Actif | décocher suspend le rappel sans le supprimer |
+| Quand | `le jour même`, `la veille`, jusqu'à `une semaine avant`, et l'heure |
+| Déchets concernés | rien de sélectionné : le rappel part pour n'importe quelle collecte. Un ou plusieurs déchets : il ne part que pour eux |
+| Actions | une ou plusieurs commandes d'action de votre Jeedom — notification, SMS, message vocal, lampe — ou un bloc (message, scénario, variable) |
+
+Plusieurs rappels peuvent cohabiter sur la même adresse : « la veille à 19 h pour
+tout », « le jour même à 6 h 30 pour les encombrants », « le jour même à 19 h
+pour penser à rentrer les poubelles ».
+
+Le sélecteur d'action est celui des scénarios : les champs *Titre* et *Message*
+qui apparaissent à droite sont ceux de la commande choisie, dessinés par Jeedom
+lui-même. Un rappel qui ne concerne aucun déchet de la collecte ne part pas.
+
+### Jetons du message
+
+Utilisables dans le titre comme dans le message :
+
+| Jeton | Donne |
+|---|---|
+| `#dechets#` | `PMC, Papiers-cartons` — un rappel filtré ne cite que les déchets qu'il surveille |
+| `#collecte#` | `aujourd'hui`, `demain`, ou `jeudi 17/09` au-delà |
+| `#jour#` | `jeudi 17/09`, toujours |
+| `#jours#` | le nombre de jours avant la collecte |
+| `#adresse#` | l'adresse de l'équipement |
+| `#equipement#` | le nom de l'équipement |
+| `#intercommunale#` | l'intercommunale qui dessert l'adresse |
+
+Les jetons de Jeedom continuent de fonctionner par-dessus :
+`#[Objet][Équipement][Commande]#`, `variable()`, etc.
+
+Un message courant :
+
+```
+À sortir ce soir : #dechets#
+```
+
+### Vérifier qu'un rappel est bien réglé
+
+Un rappel mal réglé ne produit aucune erreur : il ne part simplement jamais.
+Deux garde-fous pour l'éviter :
+
+- sous chaque rappel, **Prochain envoi** annonce la date, l'heure et les déchets
+  du prochain départ, d'après la configuration **enregistrée** ;
+- le bouton **Tester** joue le rappel tout de suite, sur la prochaine collecte
+  qui le concerne. Il envoie pour de vrai — c'est bien l'intérêt — et ne
+  consomme pas le rappel du soir.
+
+Si une action échoue, le message apparaît au centre de messages et dans le log
+`hygeabe`. Il disparaît de lui-même au premier rappel qui repasse.
+
+### Quand les rappels partent
+
+Le plugin examine ses rappels toutes les cinq minutes, sans jamais interroger le
+service : il travaille sur le calendrier déjà en mémoire. Un rappel réglé à
+19 h 00 part donc entre 19 h 00 et 19 h 05.
+
+Si Jeedom était éteint à l'heure dite, le rappel part encore au démarrage tant
+qu'il n'a pas plus de **deux heures** de retard. Au-delà il se tait : annoncer à
+minuit une poubelle à sortir pour la veille au soir ne rend service à personne.
+
+Enregistrer un rappel ne le fait pas partir pour une échéance déjà passée : ce
+rattrapage vaut pour une box éteinte, pas pour un rappel qu'on vient d'écrire.
+Le bouton **Tester** est là pour ça.
+
+### Ce qu'une action de rappel ne peut pas être
+
+Les actions sont jouées dans le cron du cœur, partagé par tous les plugins :
+une action lente — une notification vers un service qui ne répond plus — retient
+tout le monde le temps de son délai d'attente. La seconde case à gauche d'une
+action la lance en parallèle ; en échange, son éventuel échec ne sera plus
+rapporté.
+
+Pour la même raison, cinq blocs sont refusés : **Attendre**, **Pause**, **Faire
+une demande**, **Rapport** et **Export historique**, qui retiennent le cron
+pendant des secondes ou des minutes. Le sont aussi ceux qui n'ont de sens que
+dans un scénario : **Stop**, **Ajouter un log**, **Retourner un texte**,
+**Icône**, **Tag**.
+
 ## Utilisation dans un scénario
+
+Les commandes info restent là pour tout ce que les rappels ne couvrent pas : une
+condition particulière, un enchaînement, un horaire qui dépend d'autre chose.
 
 Être prévenu la veille au soir, à 20 h, uniquement s'il y a quelque chose à
 sortir :
@@ -141,7 +234,7 @@ Si : #[Maison][Collectes][Jours avant la prochaine collecte]# == 0
 | Réglage | Rôle |
 |---|---|
 | Délai d'attente des requêtes | secondes avant d'abandonner un appel. 10 par défaut |
-| Horizon du calendrier | nombre de jours demandés à chaque lecture. 60 par défaut |
+| Horizon du calendrier | nombre de jours demandés à chaque lecture. 60 par défaut, jamais moins de 14 : un rappel « une semaine avant » doit connaître sa collecte bien avant qu'elle n'arrive |
 | Langue des libellés | langue dans laquelle le service renvoie les noms de déchets |
 
 ## Fréquence des appels
@@ -164,6 +257,9 @@ même si le service répond sans aucune collecte — ce qui arrive quand
 l'intercommunale n'a pas encore publié l'année suivante : le calendrier
 précédent est conservé plutôt qu'écrasé par du vide.
 
+L'examen des rappels, toutes les cinq minutes, n'ajoute rien à ce décompte : il
+se fait sur le calendrier déjà en mémoire, sans une seule requête.
+
 Le recalcul horaire dépend du cron du coeur, partagé par tous les plugins : un
 autre plugin anormalement lent peut faire sauter une heure. Sans conséquence
 ici, le passage suivant rattrape.
@@ -179,3 +275,7 @@ Les journaux sont dans Analyse → Logs, log `hygeabe`.
 | Aucune collecte alors que l'adresse est valide | le calendrier de l'année suivante n'est pas encore publié, ou le numéro de maison est faux |
 | Le calendrier s'arrête fin décembre | normal : les intercommunales publient l'année suivante à des dates différentes |
 | « Le service de collecte ne répond pas » | panne ou coupure réseau ; le plugin réessaie au prochain cron |
+| Un rappel ne part pas | regardez la ligne « Prochain envoi » sous le rappel : elle dit s'il est désactivé, sans action, ou si aucune collecte connue ne le concerne. Le bouton « Tester » tranche le reste |
+| Un rappel part mais rien n'arrive | l'action a échoué : le centre de messages et le log `hygeabe` donnent la commande fautive et la raison |
+| « bloc inutilisable dans un rappel » | l'action désigne un bloc qui retiendrait le cron de Jeedom, ou qui n'a de sens que dans un scénario ; passez par un scénario |
+| Un rappel est parti en retard | Jeedom était éteint à l'heure dite ; il rattrape jusqu'à deux heures après, pas au-delà |

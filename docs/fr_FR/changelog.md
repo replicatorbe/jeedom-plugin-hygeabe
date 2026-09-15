@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.5 — 15/09/2026
+
+**Rappels**
+
+- Un onglet **Rappels** dans chaque adresse : être prévenu quelques heures avant
+  la collecte n'exige plus d'écrire un scénario. Un rappel dit quand, pour quels
+  déchets, et ce qu'il déclenche — n'importe quelle commande d'action de Jeedom,
+  notification, SMS, message vocal, lampe, ou un bloc du coeur.
+- Plusieurs rappels par adresse, chacun avec son heure et son filtre de déchets :
+  « la veille à 19 h pour tout », « le jour même à 6 h 30 pour les encombrants ».
+- Le titre et le message acceptent des jetons : `#dechets#`, `#collecte#`,
+  `#jour#`, `#jours#`, `#adresse#`, `#equipement#`, `#intercommunale#`.
+- Un bouton **Tester** joue le rappel tout de suite sur la prochaine collecte
+  concernée, et une ligne **Prochain envoi** annonce sous chaque rappel ce qu'il
+  enverra et quand : un rappel mal réglé ne lève aucune erreur, il ne part
+  jamais, et c'était le seul moyen de s'en apercevoir avant le jour dit.
+- Les rappels sont examinés toutes les cinq minutes, sans jamais interroger le
+  service : ils travaillent sur le calendrier déjà en mémoire. La politique
+  d'une lecture réseau par jour est inchangée.
+- Un rappel manqué — box éteinte — part encore jusqu'à deux heures après
+  l'heure dite ; au-delà il se tait. Enregistrer un rappel ne le fait pas partir
+  pour une échéance déjà passée.
+- Une action en échec — commande supprimée, équipement désactivé, plugin de
+  notification en erreur — est rapportée au centre de messages et par le bouton
+  « Tester », au lieu de disparaître dans le silence du cœur.
+
 ## 0.4 — 13/09/2026
 
 **Déchets saisonniers**

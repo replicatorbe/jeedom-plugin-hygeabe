@@ -16,6 +16,16 @@
 
 /* ================================================================ OUTILS */
 
+/* Les déchets desservis à l'adresse, pour le filtre d'un rappel. Renseignés par
+   la réponse du serveur, donc vides tant que le calendrier n'a pas été lu. */
+var hygeabeFractions = []
+
+/* Vrai pendant la reconstruction de l'onglet Rappels. Reposer une valeur dans un
+   champ émet « change » exactement comme une saisie : sans ce drapeau, ouvrir
+   une adresse suffirait à la déclarer modifiée, et l'avertissement « quitter
+   sans enregistrer ? » tomberait sans que rien n'ait été touché. */
+var hygeabeRendering = false
+
 /* Requête AJAX vers le contrôleur du plugin.
    _options : { button: <élément à désactiver pendant l'appel>,
                 failure: <fonction recevant le message d'erreur>,
@@ -231,6 +241,9 @@ function printEqLogic(_eqLogic) {
   hygeabeFillSelect(document.getElementById('sel_hygeabeStreet'),
     (streetId === '') ? [] : [{ id: streetId, name: streetLabel }], streetId, '{{Cherchez une rue}}')
 
+  hygeabeFractions = []
+  hygeabeRenderReminders(_eqLogic)
+
   if (isset(_eqLogic.id) && _eqLogic.id != '') {
     hygeabeLoadCollections(_eqLogic.id)
   }
@@ -258,6 +271,12 @@ function hygeabeLoadCollections(_id) {
     tbody.innerHTML = ''
     document.getElementById('span_hygeabeLastUpdate').textContent =
       (result.lastUpdate === '') ? '{{jamais}}' : result.lastUpdate
+
+    /* Avant le test sur les collectes : un calendrier vide ne doit pas priver
+       l'onglet Rappels de la liste des déchets ni du prochain envoi. */
+    hygeabeFractions = isset(result.fractions) ? result.fractions : []
+    hygeabeRefreshFractionSelects()
+    hygeabeShowNextReminders(isset(result.reminders) ? result.reminders : {})
 
     if (result.collections.length === 0) {
       message('{{Aucune collecte connue. Vérifiez l\'adresse, puis cliquez sur « Rafraîchir maintenant ».}}')
@@ -311,6 +330,327 @@ function hygeabeCollectionRow(_collection) {
   row.appendChild(fractionCell)
 
   return row
+}
+
+/* ================================================================ RAPPELS */
+
+/* Une option de la liste des déchets. */
+function hygeabeFractionOption(_slug, _name, _selected) {
+  var option = document.createElement('option')
+  option.value = _slug
+  /* textContent et non innerHTML : les libellés viennent d'un service extérieur. */
+  option.textContent = _name
+  option.selected = (_selected === true)
+  return option
+}
+
+/* Remplit la liste des déchets d'un rappel en conservant la sélection. */
+function hygeabeFillFractionSelect(_select, _selected) {
+  var selected = _selected || []
+  var known = []
+  var i
+
+  _select.innerHTML = ''
+  for (i = 0; i < hygeabeFractions.length; i++) {
+    known.push(hygeabeFractions[i].slug)
+    _select.appendChild(hygeabeFractionOption(hygeabeFractions[i].slug, hygeabeFractions[i].name,
+      selected.indexOf(hygeabeFractions[i].slug) !== -1))
+  }
+  /* Un déchet retenu par le rappel mais absent du calendrier du moment — les
+     sapins en juillet, les encombrants hors tournée — reste dans la liste :
+     sinon il disparaîtrait du filtre au premier enregistrement, et le rappel
+     changerait de sens sans que personne ne l'ait demandé. */
+  for (i = 0; i < selected.length; i++) {
+    if (known.indexOf(selected[i]) === -1) {
+      /* Le libellé du service n'est pas connu : l'identifiant technique reste le
+         seul nom disponible, autant dire pourquoi il a cette tête. */
+      _select.appendChild(hygeabeFractionOption(selected[i], selected[i] + ' {{(hors calendrier)}}', true))
+    }
+  }
+  if (_select.options.length === 0) {
+    var empty = document.createElement('option')
+    empty.value = ''
+    empty.disabled = true
+    empty.textContent = '{{Calendrier pas encore lu}}'
+    _select.appendChild(empty)
+  }
+}
+
+/* Réaffiche les listes de déchets une fois le calendrier connu du serveur. */
+function hygeabeRefreshFractionSelects() {
+  var selects = document.querySelectorAll('#div_hygeabeReminders .hygeabeReminderFractions')
+  for (var i = 0; i < selects.length; i++) {
+    var selected = []
+    for (var j = 0; j < selects[i].selectedOptions.length; j++) {
+      selected.push(selects[i].selectedOptions[j].value)
+    }
+    hygeabeFillFractionSelect(selects[i], selected)
+  }
+}
+
+/* Ce que chaque rappel enverra, et quand, d'après la configuration enregistrée.
+   Un rappel mal réglé ne lève aucune erreur : il ne part jamais, et c'est la
+   seule ligne qui permette de s'en apercevoir avant le jour de la collecte. */
+function hygeabeShowNextReminders(_next) {
+  var blocks = document.querySelectorAll('#div_hygeabeReminders .hygeabeReminder')
+  for (var i = 0; i < blocks.length; i++) {
+    var id = blocks[i].querySelector('.reminderAttr[data-l1key="id"]').value
+    /* Le serveur rend une phrase entière : « Prochain envoi : ... », mais aussi
+       « Ce rappel est désactivé. » ou « Aucune action... ». Recoller un préfixe
+       ici donnerait « Prochain envoi : aucune action », c'est-à-dire la ligne la
+       moins lisible au moment précis où elle signale un défaut. */
+    blocks[i].querySelector('.hygeabeReminderNext').textContent =
+      (id !== '' && isset(_next[id])) ? _next[id] : hygeabeReminderPending()
+  }
+}
+
+/* L'état d'un rappel que le serveur n'a pas encore vu. */
+function hygeabeReminderPending() {
+  return '{{Enregistrez l\'équipement pour savoir quand ce rappel partira.}}'
+}
+
+/*
+ * Une ligne d'action, calquée sur le sélecteur d'action des scénarios. L'ordre
+ * html() → setJeeValues → appendChild → replaceWith est celui du coeur : le HTML
+ * des options contient des <script> que seul Element.prototype.html() exécute.
+ */
+function hygeabeAddReminderAction(_block, _action) {
+  var container = (_block === null) ? null : _block.querySelector('.hygeabeReminderActions')
+  if (container === null) { return null }
+  var action = _action || {}
+  if (!isset(action.options)) { action.options = {} }
+
+  var div = '<div class="hygeabeReminderAction expression" style="margin-bottom:4px;">'
+  div += '<input class="expressionAttr" data-l1key="type" style="display:none;" value="action">'
+  div += '<div class="form-group" style="margin:0;">'
+  div += '<div class="col-sm-1">'
+  div += '<input type="checkbox" class="expressionAttr" data-l1key="options" data-l2key="enable" checked title="{{Décocher pour désactiver cette action sans la supprimer}}">'
+  div += '<input type="checkbox" class="expressionAttr" data-l1key="options" data-l2key="background" title="{{Exécuter en parallèle des autres actions}}">'
+  div += '</div>'
+  div += '<div class="col-sm-5">'
+  div += '<div class="input-group">'
+  div += '<span class="input-group-btn">'
+  div += '<a class="btn btn-default btn-sm bt_hygeabeRemoveAction roundedLeft"><i class="fas fa-minus-circle"></i></a>'
+  div += '</span>'
+  div += '<input class="expressionAttr form-control input-sm cmdAction" data-l1key="cmd" placeholder="{{Commande à déclencher}}">'
+  div += '<span class="input-group-btn">'
+  div += '<a class="btn btn-default btn-sm hygeabeListAction" title="{{Choisir un bloc (message, scénario, variable...)}}"><i class="fas fa-tasks"></i></a>'
+  div += '<a class="btn btn-default btn-sm hygeabeListCmd roundedRight" title="{{Choisir une commande}}"><i class="fas fa-list-alt"></i></a>'
+  div += '</span>'
+  div += '</div>'
+  div += '</div>'
+  div += '<div class="col-sm-6 actionOptions"></div>'
+  div += '</div>'
+  div += '</div>'
+
+  var wrapper = document.createElement('div')
+  wrapper.html(div)
+  wrapper.setJeeValues(action, '.expressionAttr')
+  container.appendChild(wrapper)
+  var nodes = Array.prototype.slice.call(wrapper.childNodes)
+  wrapper.replaceWith(...nodes)
+
+  if (nodes.length > 0) {
+    hygeabeRefreshActionOptions(nodes[0], init(action.cmd, ''), action.options)
+  }
+  return nodes[0]
+}
+
+/* Les options connues d'une ligne dont le coeur n'a pas (encore) dessiné les
+   champs. Rendues au relevé, pour ne pas enregistrer du vide à leur place. */
+function hygeabePendingOptions(_line) {
+  return (isset(_line.hygeabePending) && _line.hygeabePending !== null) ? _line.hygeabePending : null
+}
+
+/* Réaffiche les options — titre, message, curseur — après un changement de
+   commande. C'est le coeur qui les dessine, d'après la commande visée : le
+   plugin n'a donc rien à savoir du moyen de prévenir.
+
+   La variante synchrone de displayActionOption fige l'onglet le temps d'un
+   aller-retour PAR action : un rappel à quatre actions le bloquerait quatre
+   fois. */
+function hygeabeRefreshActionOptions(_line, _expression, _options) {
+  var expression = String(init(_expression, ''))
+
+  /* Le rendu détruit et reconstruit le champ Message. Le rejouer à chaque perte
+     de focus effacerait ce que l'utilisateur est en train d'y taper : on ne
+     redessine que si la commande visée a réellement changé. */
+  if (_line.hygeabeExpression === expression) { return }
+  _line.hygeabeExpression = expression
+
+  /* Titre et message n'existent que dans le HTML renvoyé par le coeur. Tant
+     qu'il n'est pas arrivé — requête en échec, commande visée supprimée,
+     réponse vide — la ligne ne porte plus que ses deux cases, et l'enregistrement
+     remplacerait par du vide un message rédigé de longue date. Les options
+     connues restent donc sur la ligne jusqu'à ce qu'un rendu les remplace. */
+  _line.hygeabePending = _options || {}
+
+  jeedom.cmd.displayActionOption(expression, _options, function (html) {
+    var target = _line.querySelector('.actionOptions')
+    if (target === null) { return }
+
+    /* Le coeur répond ce mot, tel quel, pour un bloc réservé aux scénarios. */
+    if (html === 'Unsupported') {
+      target.textContent = '{{Ce bloc n\'est utilisable que dans un scénario.}}'
+      return
+    }
+    if (html === '' && expression !== '') {
+      target.textContent = '{{Options indisponibles : la commande visée a peut-être été supprimée. Le message enregistré est conservé.}}'
+      return
+    }
+    target.html(html)
+    jeedomUtils.taAutosize()
+    _line.hygeabePending = null
+  })
+}
+
+/* Un rappel : quand, pour quels déchets, et ce qu'il déclenche. */
+function hygeabeAddReminder(_reminder) {
+  /* Garde, comme sur chaque getElementById du plugin : printEqLogic appelle
+     cette fonction avant de remplir l'onglet Calendrier, et une exception ici
+     laisserait les deux onglets vides — exactement ce qui arrive si le JS est
+     déployé avant la page. */
+  var container = document.getElementById('div_hygeabeReminders')
+  if (container === null) { return null }
+  var reminder = _reminder || {}
+  var i
+
+  /* Toutes les valeurs que le serveur accepte, sans trou : un « 5 jours avant »
+     venu d'une restauration ne correspondrait à aucune option, le select
+     resterait vide et le premier enregistrement le ramènerait silencieusement à
+     « le jour même ». */
+  var days = ''
+  for (i = 0; i <= 7; i++) {
+    days += '<option value="' + i + '">'
+    days += (i === 0) ? '{{le jour même}}' : (i === 1) ? '{{la veille}}'
+          : (i === 7) ? '{{une semaine avant}}' : i + ' {{jours avant}}'
+    days += '</option>'
+  }
+
+  var div = '<div class="hygeabeReminder" style="border:1px solid rgba(128,128,128,.35);border-radius:4px;padding:10px;margin-bottom:10px;">'
+  div += '<input class="reminderAttr" data-l1key="id" style="display:none;">'
+  div += '<div class="form-group" style="margin:0 0 8px 0;">'
+  div += '<div class="col-sm-12">'
+  div += '<label class="checkbox-inline" style="padding-left:20px;"><input type="checkbox" class="reminderAttr" data-l1key="enable" checked> {{Actif}}</label>'
+  div += '&nbsp;&nbsp;'
+  div += '<select class="reminderAttr form-control input-sm" data-l1key="days" style="width:auto;display:inline-block;">'
+  div += days
+  div += '</select>'
+  div += ' {{à}} '
+  div += '<input type="time" class="reminderAttr form-control input-sm" data-l1key="time" style="width:auto;display:inline-block;">'
+  div += '<a class="btn btn-default btn-sm bt_hygeabeTestReminder" style="margin-left:10px;" title="{{Joue ce rappel tout de suite, sur la prochaine collecte concernée}}"><i class="fas fa-bell"></i> {{Tester}}</a>'
+  div += '<a class="btn btn-danger btn-sm bt_hygeabeRemoveReminder pull-right"><i class="fas fa-minus-circle"></i> {{Supprimer}}</a>'
+  div += '</div>'
+  div += '</div>'
+  div += '<div class="form-group" style="margin:0 0 8px 0;">'
+  div += '<label class="col-sm-2 control-label" style="text-align:left;">{{Déchets concernés}}</label>'
+  div += '<div class="col-sm-4">'
+  div += '<select class="form-control input-sm hygeabeReminderFractions" multiple size="4"></select>'
+  div += '</div>'
+  div += '<div class="col-sm-6">'
+  div += '<span class="help-block" style="margin:0;">{{Rien de sélectionné : le rappel part pour n\'importe quelle collecte. Un ou plusieurs déchets : il ne part que pour eux, et #dechets# ne cite qu\'eux. Ctrl+clic pour en choisir plusieurs.}}</span>'
+  div += '</div>'
+  div += '</div>'
+  div += '<div class="hygeabeReminderActions"></div>'
+  div += '<a class="btn btn-default btn-xs bt_hygeabeAddAction"><i class="fas fa-plus"></i> {{Ajouter une action}}</a>'
+  div += '<span class="help-block" style="margin:6px 0 0 0;">{{Les deux cases à gauche d\'une action : la jouer, et la jouer en parallèle des autres.}}</span>'
+  div += '<span class="hygeabeReminderNext help-block" style="margin:6px 0 0 0;font-style:italic;"></span>'
+  div += '</div>'
+
+  var wrapper = document.createElement('div')
+  wrapper.html(div)
+  /* Seuls les champs simples : setJeeValues ne sait pas poser une liste, et le
+     filtre comme les actions se reconstruisent juste après. */
+  wrapper.setJeeValues({
+    id: init(reminder.id, ''),
+    enable: (isset(reminder.enable) && reminder.enable != 1) ? '0' : '1',
+    days: String(init(reminder.days, 1)),
+    time: init(reminder.time, '19:00')
+  }, '.reminderAttr')
+  container.appendChild(wrapper)
+  var nodes = Array.prototype.slice.call(wrapper.childNodes)
+  wrapper.replaceWith(...nodes)
+  var block = nodes[0]
+
+  /* Sans cela, un rappel tout juste ajouté serait le seul à n'afficher aucune
+     ligne d'état, sans qu'on sache si c'est normal. */
+  block.querySelector('.hygeabeReminderNext').textContent = hygeabeReminderPending()
+
+  hygeabeFillFractionSelect(block.querySelector('.hygeabeReminderFractions'), init(reminder.fractions, []))
+
+  var actions = init(reminder.actions, [])
+  for (i = 0; i < actions.length; i++) {
+    hygeabeAddReminderAction(block, actions[i])
+  }
+  if (actions.length === 0) {
+    // Un rappel sans ligne d'action n'invite à rien et n'enverrait rien.
+    hygeabeAddReminderAction(block, {})
+  }
+  return block
+}
+
+/* Reconstruit l'onglet. Le coeur ne réinitialise que les .eqLogicAttr : sans
+   cela les rappels de l'adresse précédente resteraient affichés, et seraient
+   enregistrés sur celle-ci. */
+function hygeabeRenderReminders(_eqLogic) {
+  var container = document.getElementById('div_hygeabeReminders')
+  if (container === null) { return }
+  container.innerHTML = ''
+
+  var configuration = (isset(_eqLogic) && isset(_eqLogic.configuration)) ? _eqLogic.configuration : {}
+  var reminders = isset(configuration.reminders) ? configuration.reminders : []
+
+  hygeabeRendering = true
+  try {
+    for (var i = 0; i < reminders.length; i++) {
+      hygeabeAddReminder(reminders[i])
+    }
+  } finally {
+    hygeabeRendering = false
+  }
+  hygeabeShowNextReminders({})
+}
+
+/* Relève les rappels de l'écran. */
+function hygeabeCollectReminders() {
+  var reminders = []
+  var blocks = document.querySelectorAll('#div_hygeabeReminders .hygeabeReminder')
+
+  for (var i = 0; i < blocks.length; i++) {
+    var reminder = blocks[i].getJeeValues('.reminderAttr')[0]
+    /* jeeValue() ne rend que la première option d'un select multiple : le filtre
+       se relève à la main, sinon un rappel portant sur deux déchets en perdrait
+       un à chaque enregistrement. */
+    reminder.fractions = []
+    var options = blocks[i].querySelector('.hygeabeReminderFractions').selectedOptions
+    for (var j = 0; j < options.length; j++) {
+      if (options[j].value !== '') { reminder.fractions.push(options[j].value) }
+    }
+    reminder.actions = []
+    var lines = blocks[i].querySelectorAll('.hygeabeReminderAction')
+    for (var k = 0; k < lines.length; k++) {
+      var action = lines[k].getJeeValues('.expressionAttr')[0]
+      var pending = hygeabePendingOptions(lines[k])
+      if (pending !== null) {
+        /* Les champs du coeur ne sont pas à l'écran : on repose les options
+           connues, en laissant les deux cases de la ligne, elles bien présentes,
+           faire foi. */
+        action.options = Object.assign({}, pending, action.options)
+      }
+      reminder.actions.push(action)
+    }
+    reminders.push(reminder)
+  }
+  return reminders
+}
+
+/* Appelée par plugin.template.js juste avant l'enregistrement. Les rappels sont
+   une liste imbriquée : data-lXkey ne descend qu'à trois niveaux, il faut les
+   collecter à la main. */
+function saveEqLogic(_eqLogic) {
+  if (!isset(_eqLogic.configuration)) { _eqLogic.configuration = {} }
+  _eqLogic.configuration.reminders = hygeabeCollectReminders()
+  return _eqLogic
 }
 
 /* ============================================================== COMMANDES */
@@ -410,9 +750,30 @@ function hygeabeSearchStreet(_button) {
    La garde évite qu'une absence du conteneur ne casse tout le fichier. */
 var hygeabeContainer = document.getElementById('div_pageContainer') || document.body
 
+/*
+ * Ce changement de champ vient-il de l'utilisateur ? Reposer une valeur émet
+ * « change » exactement comme une saisie, et le HTML des options d'une action
+ * est injecté en asynchrone, bien après la fin du rendu : le drapeau seul ne
+ * suffit donc pas. Le coeur résout le même problème de la même façon sur ses
+ * propres champs (plugin.template.js) — un champ d'un onglet qu'on ne regarde
+ * pas n'a pas pu être modifié à la main.
+ */
+function hygeabeReminderEdited(_target) {
+  return _target.closest('#div_hygeabeReminders') !== null
+      && !hygeabeRendering
+      && _target.isVisible()
+}
+
 hygeabeContainer.addEventListener('input', function (event) {
   if (event.target.closest('.eqLogicAttr[data-l2key="house_number"]')) {
     hygeabeShowAddress()
+    return
+  }
+  /* Les champs d'un rappel ne sont pas des .eqLogicAttr : le coeur ne les voit
+     pas, et sans cela on quitterait la page en perdant un message tout juste
+     écrit, sans le moindre avertissement. */
+  if (hygeabeReminderEdited(event.target)) {
+    hygeabeMarkModified()
   }
 })
 
@@ -425,6 +786,20 @@ hygeabeContainer.addEventListener('change', function (event) {
     hygeabeCommitStreet(event.target)
     return
   }
+  if (hygeabeReminderEdited(event.target)) {
+    hygeabeMarkModified()
+  }
+})
+
+/* Les options d'une action dépendent de la commande visée : elles sont
+   redessinées quand celle-ci est saisie à la main, pas seulement choisie dans
+   la liste. */
+hygeabeContainer.addEventListener('focusout', function (event) {
+  var input = event.target.closest('.hygeabeReminderAction .cmdAction')
+  if (input === null) { return }
+  var line = input.closest('.hygeabeReminderAction')
+  var current = line.getJeeValues('.expressionAttr')[0]
+  hygeabeRefreshActionOptions(line, input.jeeValue(), init(current.options))
 })
 
 /* Entrée dans un champ de recherche vaut clic sur la loupe : le formulaire
@@ -488,6 +863,113 @@ hygeabeContainer.addEventListener('click', function (event) {
     }, {
       button: target,
       failure: function (message) { hygeabeShowTestResult(message, 'danger') }
+    })
+    return
+  }
+
+  /* --- Rappels --- */
+
+  if (event.target.closest('#bt_hygeabeAddReminder')) {
+    hygeabeAddReminder({})
+    hygeabeMarkModified()
+    return
+  }
+
+  if (target = event.target.closest('.bt_hygeabeRemoveReminder')) {
+    var doomed = target.closest('.hygeabeReminder')
+
+    /* Un rappel vide s'enlève sans cérémonie. Un rappel rempli emporte ses
+       actions et les messages qui y ont été rédigés, et la seule façon de
+       revenir en arrière serait de recharger la page — donc de perdre aussi
+       tout le reste de la saisie. */
+    var filled = false
+    var written = doomed.querySelectorAll('.hygeabeReminderAction .cmdAction')
+    for (var w = 0; w < written.length; w++) {
+      if (written[w].value.trim() !== '') { filled = true }
+    }
+    if (!filled) {
+      doomed.remove()
+      hygeabeMarkModified()
+      return
+    }
+    jeeDialog.confirm('{{Supprimer ce rappel et toutes ses actions ?}}', function (confirmed) {
+      if (confirmed !== true) { return }
+      doomed.remove()
+      hygeabeMarkModified()
+    })
+    return
+  }
+
+  if (target = event.target.closest('.bt_hygeabeAddAction')) {
+    hygeabeAddReminderAction(target.closest('.hygeabeReminder'), {})
+    hygeabeMarkModified()
+    return
+  }
+
+  if (target = event.target.closest('.bt_hygeabeRemoveAction')) {
+    target.closest('.hygeabeReminderAction').remove()
+    hygeabeMarkModified()
+    return
+  }
+
+  if (target = event.target.closest('.hygeabeListCmd')) {
+    var cmdLine = target.closest('.hygeabeReminderAction')
+    /* Le sélecteur rappelle avec { human: '#[Objet][Équipement][Commande]#' }.
+       C'est cette forme qui est posée dans le champ ; le coeur la convertit en
+       identifiant à l'enregistrement (jeedom::fromHumanReadable), si bien qu'un
+       renommage ultérieur ne casse pas le rappel. */
+    jeedom.cmd.getSelectModal({ cmd: { type: 'action' } }, function (result) {
+      cmdLine.querySelector('.expressionAttr[data-l1key="cmd"]').jeeValue(result.human)
+      hygeabeRefreshActionOptions(cmdLine, result.human, '')
+      hygeabeMarkModified()
+    })
+    return
+  }
+
+  if (target = event.target.closest('.hygeabeListAction')) {
+    var blockLine = target.closest('.hygeabeReminderAction')
+    jeedom.getSelectActionModal({}, function (result) {
+      /* Les actions d'un rappel sont jouées dans le cron du coeur, partagé par
+         tous les plugins : « Attendre », « Pause », « Faire une demande » et les
+         rapports y retiendraient tout le monde, jusqu'à faire tuer la tâche. Les
+         autres n'ont de sens que dans un scénario. Même liste que
+         hygeabe::REMINDER_REFUSED, qui refuse aussi à l'exécution — le champ
+         reste en saisie libre. */
+      var refuses = ['wait', 'sleep', 'ask', 'report', 'exportHistory',
+                     'stop', 'log', 'scenario_return', 'icon', 'tag']
+      if (refuses.indexOf(result.human) !== -1) {
+        jeedomUtils.showAlert({
+          message: '{{Ce bloc n\'est pas utilisable dans un rappel : il retiendrait le cron de Jeedom ou n\'a de sens que dans un scénario. Passez par un scénario.}}',
+          level: 'warning',
+          timeOut: 10000
+        })
+        return
+      }
+      blockLine.querySelector('.expressionAttr[data-l1key="cmd"]').jeeValue(result.human)
+      hygeabeRefreshActionOptions(blockLine, result.human, '')
+      hygeabeMarkModified()
+    })
+    return
+  }
+
+  if (target = event.target.closest('.bt_hygeabeTestReminder')) {
+    if (target.classList.contains('disabled')) { return }
+    /* Le test travaille sur les rappels en base : une action tout juste choisie
+       et pas encore enregistrée ne serait pas celle qui est jouée. */
+    if (!hygeabeCheckSaved()) { return }
+    var testId = hygeabeCurrentId()
+    if (testId === null) { return }
+    var reminderId = target.closest('.hygeabeReminder').querySelector('.reminderAttr[data-l1key="id"]').value
+    if (reminderId === '') {
+      jeedomUtils.showAlert({ message: '{{Enregistrez d\'abord ce rappel.}}', level: 'warning' })
+      return
+    }
+    var button = target
+    jeeDialog.confirm('{{Le test envoie réellement le rappel : notification, message, lampe. Continuer ?}}', function (confirmed) {
+      if (confirmed !== true) { return }
+      hygeabeAjax('testReminder', { id: testId, reminder: reminderId }, function (data) {
+        jeedomUtils.showAlert({ message: '{{Rappel envoyé pour la collecte du}} ' + data.summary, level: 'success', timeOut: 12000 })
+      }, { button: button })
     })
     return
   }

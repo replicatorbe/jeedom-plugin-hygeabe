@@ -71,6 +71,7 @@ $eqLogics = eqLogic::byType($plugin->getId());
 			<li role="presentation"><a href="#" class="eqLogicAction" aria-controls="home" role="tab" data-toggle="tab" data-action="returnToThumbnailDisplay"><i class="fas fa-arrow-circle-left"></i></a></li>
 			<li role="presentation" class="active"><a href="#eqlogictab" aria-controls="home" role="tab" data-toggle="tab"><i class="fas fa-tachometer-alt"></i><span class="hidden-xs"> {{Équipement}}</span></a></li>
 			<li role="presentation"><a href="#collectiontab" aria-controls="home" role="tab" data-toggle="tab"><i class="fas fa-calendar-alt"></i><span class="hidden-xs"> {{Calendrier}}</span></a></li>
+			<li role="presentation"><a href="#remindertab" aria-controls="home" role="tab" data-toggle="tab"><i class="fas fa-bell"></i><span class="hidden-xs"> {{Rappels}}</span></a></li>
 			<li role="presentation"><a href="#commandtab" aria-controls="home" role="tab" data-toggle="tab"><i class="fas fa-list"></i><span class="hidden-xs"> {{Commandes}}</span></a></li>
 		</ul>
 
@@ -255,6 +256,45 @@ $eqLogics = eqLogic::byType($plugin->getId());
 						<tbody></tbody>
 						</table>
 					</div>
+				</div>
+			</div>
+
+			<!-- =========================== RAPPELS =========================== -->
+			<div role="tabpanel" class="tab-pane" id="remindertab">
+				<br>
+				<div class="col-lg-12">
+					<div class="alert alert-info" style="margin-bottom:10px;">
+						<b>{{Être prévenu sans écrire de scénario.}}</b>
+						{{Un rappel choisit le moment, les déchets concernés, et ce qu'il déclenche : une notification, un SMS, un message vocal, une lampe — n'importe quelle commande d'action de votre Jeedom. Un rappel qui ne concerne aucun déchet de la collecte ne part pas.}}
+					</div>
+
+					<!-- form-horizontal : c'est lui qui donne aux .form-group des rappels
+					     leurs marges négatives et leur clearfix. Sans ce parent, les
+					     colonnes des lignes d'action flottent sans être refermées et le
+					     bloc s'effondre sur lui-même. -->
+					<form class="form-horizontal">
+						<div id="div_hygeabeReminders"></div>
+					</form>
+
+					<a class="btn btn-default btn-sm" id="bt_hygeabeAddReminder"><i class="fas fa-plus-circle"></i> {{Ajouter un rappel}}</a>
+
+					<fieldset style="margin-top:20px;">
+						<legend><i class="fas fa-code"></i> {{Jetons utilisables dans le titre et le message}}</legend>
+						<div class="table-responsive">
+							<table class="table table-bordered table-condensed">
+								<tbody>
+									<tr><td style="width:170px;"><code>#dechets#</code></td><td>{{Les déchets concernés, séparés par des virgules : « PMC, Papiers-cartons ». Un rappel filtré ne cite que les déchets qu'il surveille.}}</td></tr>
+									<tr><td><code>#collecte#</code></td><td>{{« aujourd'hui », « demain », ou « jeudi 17/09 » au-delà.}}</td></tr>
+									<tr><td><code>#jour#</code></td><td>{{Le jour de la collecte, toujours en toutes lettres : « jeudi 17/09 ».}}</td></tr>
+									<tr><td><code>#jours#</code></td><td>{{Le nombre de jours avant la collecte.}}</td></tr>
+									<tr><td><code>#adresse#</code></td><td>{{L'adresse de cet équipement.}}</td></tr>
+									<tr><td><code>#equipement#</code></td><td>{{Le nom de cet équipement.}}</td></tr>
+									<tr><td><code>#intercommunale#</code></td><td>{{L'intercommunale qui dessert l'adresse.}}</td></tr>
+								</tbody>
+							</table>
+						</div>
+						<span class="help-block" style="margin:0;">{{Les jetons de Jeedom restent utilisables par-dessus : #[Objet][Équipement][Commande]#, variable(), etc.}}</span>
+					</fieldset>
 				</div>
 			</div>
 

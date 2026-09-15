@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.5 — 15/09/2026
+
+**Reminders**
+
+- A **Reminders** tab on every address: being warned a few hours before the
+  collection no longer requires writing a scenario. A reminder says when, for
+  which waste, and what it triggers — any Jeedom action command, notification,
+  SMS, spoken message, lamp, or a core block.
+- Several reminders per address, each with its own time and waste filter: "the
+  day before at 7 pm for everything", "on the day at 6:30 am for bulky items".
+- The title and the message accept tokens: `#dechets#`, `#collecte#`, `#jour#`,
+  `#jours#`, `#adresse#`, `#equipement#`, `#intercommunale#`.
+- A **Test** button plays the reminder right away on the next matching
+  collection, and a **Next send** line under each reminder announces what it
+  will send and when: a badly set reminder raises no error, it simply never
+  fires, and this was the only way to notice before the day itself.
+- Reminders are examined every five minutes, without ever querying the service:
+  they work on the calendar already in memory. The one-network-read-a-day policy
+  is unchanged.
+- A missed reminder — box powered off — still fires up to two hours after the
+  due time; beyond that it stays silent. Saving a reminder does not make it fire
+  for a due time already gone.
+- A failing action — deleted command, disabled device, notification plugin in
+  error — is reported in the message centre and by the "Test" button, instead of
+  vanishing into the core's silence.
+
 ## 0.4 — 13/09/2026
 
 **Seasonal waste**

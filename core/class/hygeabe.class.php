@@ -56,6 +56,39 @@ class hygeabe extends eqLogic {
      * aujourd'hui ». */
     const UNKNOWN_DAYS = -1;
 
+    /* Un rappel manqué — box éteinte, cron en retard — part encore s'il n'a que
+     * deux heures de retard. Au-delà il se tait : annoncer à minuit une poubelle
+     * à sortir pour la veille au soir ne rend service à personne. */
+    const REMINDER_GRACE = 7200;
+
+    /* Combien de temps on se souvient d'avoir envoyé un rappel. Il suffit que ce
+     * soit plus long que l'écart entre deux collectes du même déchet. */
+    const REMINDER_MEMORY = 1296000;
+
+    /* Le plus loin qu'un rappel puisse viser avant la collecte. Au-delà d'une
+     * semaine il annoncerait la collecte suivante avant que la précédente soit
+     * passée. */
+    const REMINDER_MAX_DAYS = 7;
+
+    /* L'heure d'un rappel neuf : la veille au soir, quand les poubelles se
+     * sortent. */
+    const REMINDER_DEFAULT_TIME = '19:00';
+
+    /*
+     * Blocs du coeur qu'un rappel ne doit pas jouer. « Attendre », « Pause »,
+     * « Faire une demande » et les rapports retiennent leur processus pendant
+     * des secondes ou des minutes : les actions d'un rappel sont jouées dans le
+     * cron partagé par tous les plugins, qui serait tué au bout de cinq minutes
+     * en accusant celui-ci. Les autres n'ont de sens que dans un scénario.
+     *
+     * Le sélecteur de l'interface les écarte déjà ; ce contrôle vaut pour une
+     * expression tapée à la main dans le champ, qui reste libre.
+     */
+    const REMINDER_REFUSED = array(
+        'wait', 'sleep', 'ask', 'report', 'exportHistory',
+        'stop', 'log', 'scenario_return', 'icon', 'tag',
+    );
+
     /*
      * L'identifiant du pictogramme est la seule clé stable d'un type de déchet :
      * le libellé change avec la langue et avec l'intercommunale. On s'en sert
@@ -128,6 +161,23 @@ class hygeabe extends eqLogic {
         }
     }
 
+    /*
+     * Les rappels, et rien d'autre : pas une requête réseau ici. Le pas de cinq
+     * minutes est celui de l'heure que choisit l'utilisateur — le cron horaire
+     * ne saurait honorer un rappel réglé à 19 h 30 — et chaque passage se réduit
+     * à une lecture de cache pour les adresses sans rappel.
+     */
+    public static function cron5() {
+        foreach (self::byType(__CLASS__, true) as $eqLogic) {
+            try {
+                $eqLogic->checkReminders();
+            } catch (Throwable $e) {
+                // Un rappel en échec ne doit pas priver les autres adresses du leur.
+                log::add(__CLASS__, 'error', $eqLogic->getHumanName() . ' : ' . $e->getMessage());
+            }
+        }
+    }
+
     /* ===================================================== CYCLE DE VIE eqLogic */
 
     public function preSave() {
@@ -140,6 +190,10 @@ class hygeabe extends eqLogic {
             $this->setConfiguration('per_fraction', 1);
         }
         $this->setConfiguration('rollover_hour', min(23, max(0, (int) $this->getConfiguration('rollover_hour'))));
+
+        /* Les rappels arrivent du formulaire tels que le JS les a ramassés :
+         * c'est ici, et pas à l'envoi, qu'on leur impose une forme. */
+        $this->setConfiguration('reminders', self::cleanReminders($this->getConfiguration('reminders')));
 
         /*
          * Le service n'accepte qu'un entier positif. Un texte qui n'en contient
@@ -170,23 +224,23 @@ class hygeabe extends eqLogic {
     public function postSave() {
         $this->createCommands();
 
-        if (!$this->isConfigured()) {
-            return;
+        if ($this->isConfigured()) {
+            try {
+                /*
+                 * Forcer la lecture à chaque enregistrement ferait deux appels au
+                 * service pour un simple changement de nom ou d'icône. Seule une
+                 * adresse différente justifie de tout relire.
+                 */
+                $calendar = $this->getCalendar();
+                $changed = !isset($calendar['address']) || $calendar['address'] !== $this->addressSignature();
+                $this->update($changed);
+            } catch (Throwable $e) {
+                // L'enregistrement ne doit pas échouer parce que le service est
+                // indisponible : l'adresse est valide, le cron réessaiera.
+                log::add(__CLASS__, 'error', $this->getHumanName() . ' : ' . $e->getMessage());
+            }
         }
-        try {
-            /*
-             * Forcer la lecture à chaque enregistrement ferait deux appels au
-             * service pour un simple changement de nom ou d'icône. Seule une
-             * adresse différente justifie de tout relire.
-             */
-            $calendar = $this->getCalendar();
-            $changed = !isset($calendar['address']) || $calendar['address'] !== $this->addressSignature();
-            $this->update($changed);
-        } catch (Throwable $e) {
-            // L'enregistrement ne doit pas échouer parce que le service est
-            // indisponible : l'adresse est valide, le cron réessaiera.
-            log::add(__CLASS__, 'error', $this->getHumanName() . ' : ' . $e->getMessage());
-        }
+        $this->settleReminders();
     }
 
     public function preRemove() {
@@ -195,6 +249,9 @@ class hygeabe extends eqLogic {
          * doit donc être nettoyé tant que l'identifiant est encore lisible.
          */
         $this->clearCalendar();
+        // Sans cela, une adresse recréée hériterait de la mémoire des rappels de
+        // l'ancienne — des clés que plus aucun écran ne permet de voir.
+        $this->forgetReminders();
         // Sans cela le message reste au centre de messages avec un identifiant
         // qu'aucun code ne pourra plus faire correspondre : impossible à effacer
         // autrement qu'à la main.
@@ -480,7 +537,11 @@ class hygeabe extends eqLogic {
     /* Interroge le service et range le calendrier par date. */
     private function fetchCalendar($_previous = array()) {
         $from  = new DateTimeImmutable('today', self::timezone());
-        $until = $from->modify('+' . max(7, (int) config::byKey('days_ahead', __CLASS__, 60)) . ' days');
+        /* Le plancher couvre le rappel le plus lointain. Avec un horizon de sept
+         * jours, une collecte n'entrerait au calendrier que le matin du jour où
+         * son rappel « une semaine avant » aurait dû partir : celui-ci ne
+         * trouverait jamais sa collecte, et se tairait sans une trace. */
+        $until = $from->modify('+' . max(self::REMINDER_MAX_DAYS + 7, (int) config::byKey('days_ahead', __CLASS__, 60)) . ' days');
 
         $items = self::requestAll('/collections', array(
             'zipcodeId'   => $this->getConfiguration('zipcode_id'),
@@ -789,6 +850,490 @@ class hygeabe extends eqLogic {
             }
         }
         $this->checkAndUpdateCmd($_logicalId, $_value);
+    }
+
+    /* ================================================================== RAPPELS */
+
+    /*
+     * Un rappel dit quand prévenir, pour quels déchets, et par quoi. Le « par
+     * quoi » est une liste d'actions au format du coeur : le sélecteur de
+     * l'interface est celui des scénarios, et scenarioExpression::createAndExec
+     * les joue, qu'il s'agisse d'une notification, d'une lampe ou d'un bloc
+     * message. Le plugin n'a donc rien à savoir du moyen de prévenir.
+     */
+
+    /*
+     * Remet la liste des rappels en forme. L'identifiant est ce qui compte : il
+     * sert de clé à la mémoire anti-doublon, si bien que déplacer un rappel dans
+     * la liste ne doit pas le faire repartir. Il est posé ici, une fois, et ne
+     * change plus.
+     */
+    public static function cleanReminders($_reminders) {
+        if (!is_array($_reminders)) {
+            return array();
+        }
+        $clean = array();
+        foreach ($_reminders as $reminder) {
+            if (!is_array($reminder)) {
+                continue;
+            }
+            $id = isset($reminder['id']) ? preg_replace('/[^a-zA-Z0-9]/', '', (string) $reminder['id']) : '';
+            if ($id === '') {
+                $id = substr(str_replace('-', '', self::uuid()), 0, 12);
+            }
+
+            /* Une heure illisible vaut mieux remplacée que rejetée : preSave ne
+             * doit jamais empêcher l'enregistrement, sans quoi la page se
+             * rafraîchit et toute la saisie disparaît. */
+            $time = isset($reminder['time']) ? trim((string) $reminder['time']) : '';
+            if (!preg_match('/^([01][0-9]|2[0-3]):[0-5][0-9]$/', $time)) {
+                $time = self::REMINDER_DEFAULT_TIME;
+            }
+
+            $fractions = array();
+            if (isset($reminder['fractions']) && is_array($reminder['fractions'])) {
+                foreach ($reminder['fractions'] as $slug) {
+                    $slug = trim((string) $slug);
+                    if ($slug !== '' && !in_array($slug, $fractions)) {
+                        $fractions[] = $slug;
+                    }
+                }
+            }
+
+            $actions = array();
+            if (isset($reminder['actions']) && is_array($reminder['actions'])) {
+                foreach ($reminder['actions'] as $action) {
+                    if (!is_array($action) || trim((string) (isset($action['cmd']) ? $action['cmd'] : '')) === '') {
+                        // Une ligne d'action vide est une ligne que l'utilisateur
+                        // a ajoutée sans la remplir : la garder n'apporte rien.
+                        continue;
+                    }
+                    $actions[] = array(
+                        'cmd'     => trim((string) $action['cmd']),
+                        'options' => (isset($action['options']) && is_array($action['options'])) ? $action['options'] : array(),
+                    );
+                }
+            }
+
+            $clean[] = array(
+                'id'        => $id,
+                'enable'    => (isset($reminder['enable']) && $reminder['enable'] == 1) ? 1 : 0,
+                'days'      => min(self::REMINDER_MAX_DAYS, max(0, (int) (isset($reminder['days']) ? $reminder['days'] : 1))),
+                'time'      => $time,
+                'fractions' => $fractions,
+                'actions'   => $actions,
+            );
+        }
+        return $clean;
+    }
+
+    /* Les rappels enregistrés, remis en forme. */
+    public function reminders() {
+        return self::cleanReminders($this->getConfiguration('reminders'));
+    }
+
+    /* La collecte pour laquelle ce rappel est déjà parti. */
+    private function reminderKey($_id) {
+        return 'hygeabe::reminded::' . $this->getId() . '::' . $_id;
+    }
+
+    private function forgetReminders() {
+        foreach ($this->reminders() as $reminder) {
+            cache::delete($this->reminderKey($reminder['id']));
+            message::removeAll(__CLASS__, $this->reminderKey($reminder['id']));
+        }
+    }
+
+    /* « la veille à 19:00 » — pour le journal et pour l'interface. */
+    public static function reminderLabel($_reminder) {
+        if ($_reminder['days'] == 0) {
+            $when = __('le jour même', __FILE__);
+        } elseif ($_reminder['days'] == 1) {
+            $when = __('la veille', __FILE__);
+        } else {
+            $when = $_reminder['days'] . ' ' . __('jours avant', __FILE__);
+        }
+        return $when . ' ' . __('à', __FILE__) . ' ' . $_reminder['time'];
+    }
+
+    /* Le moment où un rappel doit partir pour une collecte donnée. */
+    public static function reminderTarget($_reminder, $_date) {
+        $date = DateTimeImmutable::createFromFormat('!Y-m-d', $_date, self::timezone());
+        if ($date === false) {
+            return null;
+        }
+        $parts = explode(':', $_reminder['time']);
+        return $date->modify('-' . (int) $_reminder['days'] . ' day')
+                    ->setTime((int) $parts[0], (int) $parts[1]);
+    }
+
+    /*
+     * Les déchets de cette collecte que le rappel concerne. Un rappel sans filtre
+     * les prend tous ; un rappel filtré qui n'en retient aucun se tait, plutôt
+     * que d'annoncer une sortie de poubelle sans dire laquelle.
+     */
+    private static function reminderFractions($_reminder, $_collection) {
+        if (count($_reminder['fractions']) == 0) {
+            return $_collection['fractions'];
+        }
+        $kept = array();
+        foreach ($_collection['fractions'] as $fraction) {
+            if (in_array($fraction['slug'], $_reminder['fractions'])) {
+                $kept[] = $fraction;
+            }
+        }
+        return $kept;
+    }
+
+    /* Décrit une collecte pour le gabarit de message et pour l'affichage. */
+    private static function describeDue($_collection, $_fractions, $_today) {
+        return array(
+            'date'      => $_collection['date'],
+            'days'      => self::daysUntil($_collection['date'], $_today),
+            'fractions' => $_fractions,
+        );
+    }
+
+    /* La collecte qu'un rappel doit annoncer maintenant, ou null s'il n'y a rien
+     * à dire. */
+    private function dueCollection($_reminder, $_collections, $_now, $_today) {
+        foreach ($_collections as $collection) {
+            $fractions = self::reminderFractions($_reminder, $collection);
+            if (count($fractions) == 0) {
+                continue;
+            }
+            $target = self::reminderTarget($_reminder, $collection['date']);
+            if ($target === null || $_now < $target) {
+                continue;
+            }
+            /*
+             * Passé la fenêtre de rattrapage, on laisse tomber : les collectes
+             * sont rangées par date, et une échéance vieille de plusieurs jours
+             * est celle d'une collecte déjà faite.
+             */
+            if ($_now->getTimestamp() - $target->getTimestamp() > self::REMINDER_GRACE) {
+                continue;
+            }
+            return self::describeDue($collection, $fractions, $_today);
+        }
+        return null;
+    }
+
+    /*
+     * Envoie les rappels dont l'heure est venue. Rien n'est demandé au service :
+     * tout se joue sur le calendrier déjà en cache, ce qui rend le rappel
+     * insensible à une panne — un calendrier de la veille annonce la même
+     * collecte que celui d'aujourd'hui.
+     */
+    public function checkReminders() {
+        $reminders = $this->reminders();
+        if (count($reminders) == 0) {
+            return;
+        }
+        $calendar = $this->getCalendar();
+        $collections = isset($calendar['collections']) ? $calendar['collections'] : array();
+        if (count($collections) == 0) {
+            return;
+        }
+        $now = new DateTimeImmutable('now', self::timezone());
+        $today = new DateTimeImmutable('today', self::timezone());
+
+        foreach ($reminders as $reminder) {
+            if ($reminder['enable'] != 1 || count($reminder['actions']) == 0) {
+                continue;
+            }
+            $due = $this->dueCollection($reminder, $collections, $now, $today);
+            if ($due === null) {
+                continue;
+            }
+            $key = $this->reminderKey($reminder['id']);
+            if (cache::byKey($key)->getValue('') === $due['date']) {
+                continue;
+            }
+            /*
+             * Marqué avant d'être joué : une action qui meurt sur une erreur
+             * fatale ne doit pas faire repartir tout le lot toutes les cinq
+             * minutes jusqu'à la collecte.
+             */
+            cache::set($key, $due['date'], self::REMINDER_MEMORY);
+            log::add(__CLASS__, 'info', $this->getHumanName() . ' ' . __('rappel', __FILE__) . ' '
+                   . self::reminderLabel($reminder) . ' : ' . self::dateLabel($due['date'])
+                   . ' — ' . implode(', ', array_column($due['fractions'], 'name')));
+            $this->runReminderActions($reminder, $due);
+        }
+    }
+
+    /*
+     * Joue les actions d'un rappel. scenarioExpression::createAndExec est le
+     * primitif du coeur pour une action configurée par l'utilisateur : il accepte
+     * une commande comme un bloc, honore les cases « désactivée » et « en tâche
+     * de fond » posées par le sélecteur, et retrouve sa cible même après un
+     * renommage, la configuration étant enregistrée sous forme d'identifiant
+     * (jeedom::fromHumanReadable, appelé par eqLogic.ajax.php).
+     *
+     * Rend la liste des échecs, pour que le bouton de test puisse les montrer.
+     */
+    private function runReminderActions($_reminder, $_due, $_report = true) {
+        $tags = $this->reminderTags($_due);
+        $errors = array();
+
+        foreach ($_reminder['actions'] as $action) {
+            $options = is_array($action['options']) ? $action['options'] : array();
+            // Le coeur lit la case « désactivée » de la même façon, et la valeur
+            // par défaut est « activée ».
+            if (isset($options['enable']) && $options['enable'] == 0) {
+                continue;
+            }
+            /*
+             * Les jetons du coeur d'abord — variable(), date(), une commande
+             * insérée dans le texte — les nôtres ensuite. Dans l'autre sens, un
+             * nom de déchet serait relu comme une expression au passage :
+             * « Encombrants (sur rendez-vous) » n'a rien à faire dans un
+             * évaluateur.
+             */
+            $scenario = null;
+            foreach ($options as $key => $value) {
+                if (!is_string($value)) {
+                    continue;
+                }
+                $value = scenarioExpression::setTags($value, $scenario);
+                $options[$key] = str_replace(array_keys($tags), array_values($tags), $value);
+            }
+            try {
+                $this->runReminderAction($action['cmd'], $options);
+            } catch (Throwable $e) {
+                // Une action en échec ne doit pas retenir les suivantes : une
+                // notification cassée ne doit pas empêcher la lampe de s'allumer.
+                $errors[] = $action['cmd'] . ' — ' . $e->getMessage();
+                log::add(__CLASS__, 'error', $this->getHumanName() . ' '
+                       . __('action de rappel en échec :', __FILE__) . ' ' . $action['cmd']
+                       . ' — ' . $e->getMessage());
+            }
+        }
+
+        if (!$_report) {
+            return $errors;
+        }
+        /*
+         * Un rappel qui ne part plus doit se voir : le journal ne suffit pas, il
+         * n'est pas relu par celui qui attendait la notification. Le message
+         * disparaît de lui-même au premier rappel qui repasse.
+         */
+        $key = $this->reminderKey($_reminder['id']);
+        message::removeAll(__CLASS__, $key);
+        if (count($errors) > 0) {
+            message::add(__CLASS__, $this->getHumanName() . ' '
+                       . __('rappel en échec :', __FILE__) . ' ' . implode(' ; ', $errors), '', $key);
+        }
+        return $errors;
+    }
+
+    /*
+     * Joue une action, et laisse remonter ce qui ne va pas.
+     *
+     * scenarioExpression::createAndExec est le primitif du coeur pour une action
+     * configurée par l'utilisateur, mais il avale ses erreurs quand aucun
+     * scénario n'est là pour les recevoir : son catch final passe par setLog(),
+     * qui ne fait rien d'un scénario nul, et une commande supprimée n'y lève
+     * même pas — elle produit une ligne de journal qui ne va nulle part. Un
+     * rappel devenu muet serait alors indétectable, et le bouton « Tester »
+     * annoncerait un succès sans avoir rien vérifié.
+     *
+     * Une commande est donc résolue et jouée ici, où execCmd() lève pour de bon.
+     * Les blocs du coeur — message, scénario, variable — restent confiés à
+     * createAndExec, seul à savoir les exécuter.
+     */
+    private function runReminderAction($_expression, $_options) {
+        $expression = trim((string) $_expression);
+
+        if (in_array($expression, self::REMINDER_REFUSED)) {
+            throw new Exception(__('bloc inutilisable dans un rappel :', __FILE__) . ' ' . $expression);
+        }
+
+        /*
+         * Une commande est enregistrée sous forme d'identifiant : la forme
+         * humaine posée par le sélecteur est convertie par le coeur à
+         * l'enregistrement (jeedom::fromHumanReadable, eqLogic.ajax.php). Tout
+         * ce qui n'a pas cette forme est un bloc.
+         */
+        if (!preg_match('/^#(\d+)#$/', $expression, $matches)) {
+            // 'source' sert de libellé d'origine au bloc « message » du coeur,
+            // qui en fait le nom affiché au centre de messages.
+            $_options['source'] = $this->getHumanName();
+            scenarioExpression::createAndExec('action', $expression, $_options);
+            return;
+        }
+
+        $cmd = cmd::byId($matches[1]);
+        if (!is_object($cmd)) {
+            throw new Exception(__('commande introuvable :', __FILE__) . ' ' . $expression);
+        }
+        if ($cmd->getType() != 'action') {
+            throw new Exception(__('ce n\'est pas une commande d\'action :', __FILE__) . ' ' . $cmd->getHumanName());
+        }
+
+        /* En tâche de fond, le coeur relance l'action dans un autre processus :
+         * on ne saura rien de son sort, mais c'est exactement ce que
+         * l'utilisateur a demandé en cochant la case. */
+        if (isset($_options['background']) && $_options['background'] == 1) {
+            scenarioExpression::createAndExec('action', $expression, $_options);
+            return;
+        }
+
+        /* Le coeur retire la case « désactivée » avant d'exécuter ; la case
+         * « en tâche de fond » n'a plus d'objet ici. Les substitutions, elles,
+         * ont déjà eu lieu — dans le bon ordre. */
+        unset($_options['enable'], $_options['background']);
+        $cmd->execCmd($_options);
+    }
+
+    /* Ce que l'utilisateur peut écrire dans le titre ou le message d'une action. */
+    private function reminderTags($_due) {
+        $calendar = $this->getCalendar();
+        return array(
+            '#dechets#'        => implode(', ', array_column($_due['fractions'], 'name')),
+            '#collecte#'       => self::humanDate($_due['date'], $_due['days']),
+            '#jour#'           => self::dateLabel($_due['date']),
+            '#jours#'          => (string) $_due['days'],
+            '#adresse#'        => $this->addressLabel(),
+            '#equipement#'     => $this->getName(),
+            '#intercommunale#' => isset($calendar['operator']) ? $calendar['operator'] : '',
+        );
+    }
+
+    /* L'adresse en une ligne, telle que l'interface l'affiche. */
+    public function addressLabel() {
+        $street = trim((string) $this->getConfiguration('street_label'));
+        $number = trim((string) $this->getConfiguration('house_number'));
+        $zipcode = trim((string) $this->getConfiguration('zipcode_label'));
+
+        $parts = array();
+        if ($street !== '') {
+            $parts[] = ($number === '') ? $street : $street . ' ' . $number;
+        }
+        if ($zipcode !== '') {
+            $parts[] = $zipcode;
+        }
+        return implode(', ', $parts);
+    }
+
+    /*
+     * Ce que chaque rappel enverra, et quand. C'est le seul moyen de vérifier
+     * depuis l'interface qu'un rappel est bien réglé : mal réglé, il ne produit
+     * aucune erreur — il ne part simplement jamais.
+     */
+    public function nextReminders() {
+        $calendar = $this->getCalendar();
+        $collections = isset($calendar['collections']) ? $calendar['collections'] : array();
+        $now = new DateTimeImmutable('now', self::timezone());
+        $next = array();
+
+        foreach ($this->reminders() as $reminder) {
+            /* Des phrases entières, et non des bouts à recoller côté
+             * navigateur : « Prochain envoi : aucune action » se lisait plus mal
+             * que le défaut qu'il était censé signaler. */
+            if ($reminder['enable'] != 1) {
+                $next[$reminder['id']] = __('Ce rappel est désactivé.', __FILE__);
+                continue;
+            }
+            if (count($reminder['actions']) == 0) {
+                $next[$reminder['id']] = __('Aucune action : ce rappel n\'enverra rien.', __FILE__);
+                continue;
+            }
+
+            $next[$reminder['id']] = __('Aucune collecte connue ne concerne ce rappel.', __FILE__);
+            foreach ($collections as $collection) {
+                $fractions = self::reminderFractions($reminder, $collection);
+                if (count($fractions) == 0) {
+                    continue;
+                }
+                $target = self::reminderTarget($reminder, $collection['date']);
+                if ($target === null || $target < $now) {
+                    continue;
+                }
+                $next[$reminder['id']] = __('Prochain envoi :', __FILE__) . ' '
+                    . self::dateLabel($target->format('Y-m-d')) . ' '
+                    . __('à', __FILE__) . ' ' . $target->format('H:i') . ' — '
+                    . implode(', ', array_column($fractions, 'name'));
+                break;
+            }
+        }
+        return $next;
+    }
+
+    /*
+     * Deux ménages à faire après chaque enregistrement.
+     *
+     * Enregistrer un rappel ne doit pas le faire partir pour une échéance déjà
+     * passée : la fenêtre de rattrapage est là pour une box éteinte, pas pour un
+     * rappel qu'on vient d'écrire — ni pour la copie d'un équipement, qui repart
+     * avec une mémoire vierge. L'échéance en cours est donc marquée comme
+     * traitée, sans rien envoyer.
+     *
+     * Et le message d'échec d'un rappel supprimé dans l'interface n'a plus
+     * personne pour l'effacer : il resterait au centre de messages avec un
+     * identifiant qu'aucun code ne peut plus faire correspondre.
+     */
+    private function settleReminders() {
+        $reminders = $this->reminders();
+        $calendar = $this->getCalendar();
+        $collections = isset($calendar['collections']) ? $calendar['collections'] : array();
+        $now = new DateTimeImmutable('now', self::timezone());
+        $today = new DateTimeImmutable('today', self::timezone());
+
+        $known = array();
+        foreach ($reminders as $reminder) {
+            $key = $this->reminderKey($reminder['id']);
+            $known[] = $key;
+            $due = $this->dueCollection($reminder, $collections, $now, $today);
+            if ($due !== null) {
+                cache::set($key, $due['date'], self::REMINDER_MEMORY);
+            }
+        }
+
+        $prefix = 'hygeabe::reminded::' . $this->getId() . '::';
+        foreach (message::byPlugin(__CLASS__) as $message) {
+            $logicalId = $message->getLogicalId();
+            if (strpos($logicalId, $prefix) === 0 && !in_array($logicalId, $known)) {
+                $message->remove();
+            }
+        }
+    }
+
+    /*
+     * Joue un rappel tout de suite, sur la prochaine collecte qui le concerne.
+     * La mémoire anti-doublon n'est pas touchée : essayer un rappel ne doit pas
+     * empêcher le vrai de partir le soir venu.
+     */
+    public function testReminder($_id) {
+        foreach ($this->reminders() as $reminder) {
+            if ($reminder['id'] !== $_id) {
+                continue;
+            }
+            if (count($reminder['actions']) == 0) {
+                throw new Exception(__('Ce rappel ne déclenche aucune action.', __FILE__));
+            }
+
+            $calendar = $this->getCalendar();
+            $today = new DateTimeImmutable('today', self::timezone());
+            foreach (isset($calendar['collections']) ? $calendar['collections'] : array() as $collection) {
+                if (self::daysUntil($collection['date'], $today) < 0) {
+                    continue;
+                }
+                $fractions = self::reminderFractions($reminder, $collection);
+                if (count($fractions) == 0) {
+                    continue;
+                }
+                $due = self::describeDue($collection, $fractions, $today);
+                $errors = $this->runReminderActions($reminder, $due, false);
+                if (count($errors) > 0) {
+                    throw new Exception(implode(' ; ', $errors));
+                }
+                return self::dateLabel($due['date']) . ' — ' . implode(', ', array_column($fractions, 'name'));
+            }
+            throw new Exception(__('Aucune collecte connue ne concerne ce rappel : il n\'y a rien à envoyer.', __FILE__));
+        }
+        throw new Exception(__('Rappel introuvable : enregistrez l\'équipement avant de le tester.', __FILE__));
     }
 
     /* ================================================================= MESSAGES */
