@@ -1340,6 +1340,20 @@ class hygeabe extends eqLogic {
 
     private function reportProblem($_text) {
         $text = $this->getHumanName() . ' ' . $_text;
+        /*
+         * Le cron horaire repasse sur une adresse en panne — ou jamais
+         * renseignée — toutes les heures : sans ce contrôle, vingt-quatre
+         * erreurs par jour pour une seule cause. Déjà affichée, elle ne
+         * descend plus qu'en debug. Le coeur enregistre le texte passé par
+         * secureXSS() : la comparaison doit l'être aussi.
+         */
+        $existing = message::byPluginLogicalId(__CLASS__, 'address' . $this->getId());
+        foreach (is_array($existing) ? $existing : array() as $message) {
+            if ($message->getMessage() === secureXSS($text)) {
+                log::add(__CLASS__, 'debug', $text);
+                return;
+            }
+        }
         log::add(__CLASS__, 'error', $text);
         /*
          * message::save() ne met à jour que la date et le compteur d'un message
