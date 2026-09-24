@@ -945,12 +945,10 @@ hygeabeContainer.addEventListener('click', function (event) {
       /* Les actions d'un rappel sont jouées dans le cron du coeur, partagé par
          tous les plugins : « Attendre », « Pause », « Faire une demande » et les
          rapports y retiendraient tout le monde, jusqu'à faire tuer la tâche. Les
-         autres n'ont de sens que dans un scénario. Même liste que
+         autres n'ont de sens que dans un scénario. La liste vient de
          hygeabe::REMINDER_REFUSED, qui refuse aussi à l'exécution — le champ
          reste en saisie libre. */
-      var refuses = ['wait', 'sleep', 'ask', 'report', 'exportHistory',
-                     'stop', 'log', 'scenario_return', 'icon', 'tag']
-      if (refuses.indexOf(result.human) !== -1) {
+      if (hygeabeRefusedBlocks.indexOf(result.human) !== -1) {
         jeedomUtils.showAlert({
           message: '{{Ce bloc n\'est pas utilisable dans un rappel : il retiendrait le cron de Jeedom ou n\'a de sens que dans un scénario. Passez par un scénario.}}',
           level: 'warning',

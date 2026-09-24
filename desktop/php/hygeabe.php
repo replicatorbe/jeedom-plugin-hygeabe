@@ -4,6 +4,8 @@ if (!isConnect('admin')) {
 }
 $plugin = plugin::byId('hygeabe');
 sendVarToJS('eqType', $plugin->getId());
+// Les blocs qu'un rappel refuse : une seule liste, celle qui s'applique aussi à l'exécution.
+sendVarToJS('hygeabeRefusedBlocks', hygeabe::REMINDER_REFUSED);
 $eqLogics = eqLogic::byType($plugin->getId());
 ?>
 
