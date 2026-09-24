@@ -1435,7 +1435,10 @@ class hygeabe extends eqLogic {
             'slug'      => $slug,
             'name'      => ($name == '') ? $slug : $name,
             'color'     => isset($_fraction['colors']['base']) ? $_fraction['colors']['base'] : (isset($_fraction['color']) ? $_fraction['color'] : '#777777'),
-            'textColor' => isset($_fraction['colors']['text']) ? $_fraction['colors']['text'] : '#FFFFFF',
+            /* Vide plutôt que blanc quand le service se tait : l'affichage calcule
+             * alors une couleur lisible sur le fond. Un blanc d'office rendait ce
+             * calcul inopérant, et le jaune des papiers-cartons illisible. */
+            'textColor' => isset($_fraction['colors']['text']) ? $_fraction['colors']['text'] : '',
             'icon'      => $icon,
         );
     }

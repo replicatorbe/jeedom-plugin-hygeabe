@@ -143,6 +143,18 @@ function hygeabeShowAddress() {
   document.getElementById('span_hygeabeAddress').textContent = (parts.length === 0) ? '-' : parts.join(', ')
 }
 
+/* Une couleur de texte lisible sur le fond d'une étiquette quand le service
+   n'en fournit pas. Même calcul que le widget du dashboard, qui ne peut pas
+   partager ce fichier. */
+function hygeabeReadableOn(_background, _given) {
+  if (typeof _given === 'string' && /^#[0-9a-f]{3,8}$/i.test(_given)) { return _given }
+  var found = /^#([0-9a-f]{6})$/i.exec(String(_background || ''))
+  if (!found) { return '#FFFFFF' }
+  var value = parseInt(found[1], 16)
+  var luminance = 0.2126 * ((value >> 16) & 255) + 0.7152 * ((value >> 8) & 255) + 0.0722 * (value & 255)
+  return (luminance > 150) ? '#1E1E1E' : '#FFFFFF'
+}
+
 /* Message affiché sous les boutons de test. */
 function hygeabeShowTestResult(_message, _level) {
   var container = document.getElementById('span_hygeabeTestResult')
@@ -320,10 +332,11 @@ function hygeabeCollectionRow(_collection) {
     badge.style.display = 'inline-block'
     badge.style.margin = '2px 4px 2px 0'
     badge.style.fontSize = '1em'
-    badge.style.backgroundColor = _collection.fractions[i].color || '#777777'
-    /* La couleur de texte vient du service : le blanc d'office rendrait le
-       jaune des papiers-cartons illisible. */
-    badge.style.color = _collection.fractions[i].textColor || '#FFFFFF'
+    var background = _collection.fractions[i].color || '#777777'
+    badge.style.backgroundColor = background
+    /* La couleur de texte vient du service ; à défaut elle est calculée : le
+       blanc d'office rendrait le jaune des papiers-cartons illisible. */
+    badge.style.color = hygeabeReadableOn(background, _collection.fractions[i].textColor)
     badge.textContent = _collection.fractions[i].name
     fractionCell.appendChild(badge)
   }
