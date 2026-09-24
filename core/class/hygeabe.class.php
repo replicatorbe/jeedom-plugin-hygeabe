@@ -533,15 +533,20 @@ class hygeabe extends eqLogic {
         return $this->_refreshError;
     }
 
-    /* Interroge le service et range le calendrier par date. */
+    /*
+     * Le nombre de jours de collectes demandés au service. Le plancher couvre le
+     * rappel le plus lointain : avec un horizon de sept jours, une collecte
+     * n'entrerait au calendrier que le matin du jour où son rappel « une
+     * semaine avant » aurait dû partir, et celui-ci se tairait sans une trace.
+     */
+    public static function calendarHorizon() {
+        return max(self::REMINDER_MAX_DAYS + 7, (int) config::byKey('days_ahead', __CLASS__, 60));
+    }
+
     /* Interroge le service et range le calendrier par date. */
     private function fetchCalendar($_previous = array()) {
         $from  = new DateTimeImmutable('today', self::timezone());
-        /* Le plancher couvre le rappel le plus lointain. Avec un horizon de sept
-         * jours, une collecte n'entrerait au calendrier que le matin du jour où
-         * son rappel « une semaine avant » aurait dû partir : celui-ci ne
-         * trouverait jamais sa collecte, et se tairait sans une trace. */
-        $until = $from->modify('+' . max(self::REMINDER_MAX_DAYS + 7, (int) config::byKey('days_ahead', __CLASS__, 60)) . ' days');
+        $until = $from->modify('+' . self::calendarHorizon() . ' days');
 
         $items = self::requestAll('/collections', array(
             'zipcodeId'   => $this->getConfiguration('zipcode_id'),
@@ -1701,18 +1706,22 @@ class hygeabe extends eqLogic {
                 . ' (HTTP ' . $validation['code'] . ')');
         }
 
+        /* Le même horizon que le calendrier : un test plus court annoncerait
+         * « aucune collecte » là où le calendrier enregistré en trouvera. */
         $from = new DateTimeImmutable('today', self::timezone());
+        $horizon = self::calendarHorizon();
         $items = self::requestAll('/collections', array(
             'zipcodeId'   => $_zipcodeId,
             'streetId'    => $_streetId,
             'houseNumber' => (int) $_houseNumber,
             'fromDate'    => $from->format('Y-m-d'),
-            'untilDate'   => $from->modify('+60 days')->format('Y-m-d'),
+            'untilDate'   => $from->modify('+' . $horizon . ' days')->format('Y-m-d'),
         ));
 
         $parsed = self::parseCollections($items);
         if (count($parsed['collections']) == 0) {
-            throw new Exception(__('Adresse valide, mais aucune collecte publiée pour les deux mois à venir. Vérifiez le numéro de maison.', __FILE__));
+            throw new Exception(__('Adresse valide, mais aucune collecte publiée pour les jours à venir :', __FILE__) . ' ' . $horizon . ' '
+                . __('jours examinés. Vérifiez le numéro de maison.', __FILE__));
         }
 
         $first = $parsed['collections'][0];
