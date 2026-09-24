@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6 — 24/09/2026
+
+- Waste labels stay readable when the service provides no text colour: it is
+  computed from the background, on the dashboard as in the **Calendar** tab,
+  instead of defaulting to white.
+- **Test the address** checks the same number of days as the calendar (the
+  "Calendar horizon" setting) instead of a fixed sixty days, and says how many
+  days it checked.
+- A failing address, or one not filled in yet, no longer writes an error to the
+  log every hour: while the same message is shown in the message centre, the
+  repetition only goes to debug.
+
 ## 0.5 — 15/09/2026
 
 **Reminders**

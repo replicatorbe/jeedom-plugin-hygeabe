@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6 — 24/09/2026
+
+- Les étiquettes de déchets restent lisibles quand le service ne donne pas de
+  couleur de texte : elle est calculée d'après le fond, sur le dashboard comme
+  dans l'onglet **Calendrier**, au lieu d'un blanc d'office.
+- **Tester l'adresse** examine le même nombre de jours que le calendrier
+  (réglage « Horizon du calendrier ») au lieu de soixante jours fixes, et dit
+  combien de jours il a examinés.
+- Une adresse en panne, ou pas encore renseignée, n'inscrit plus une erreur au
+  journal toutes les heures : tant que le même message est affiché au centre de
+  messages, la répétition ne descend qu'en debug.
+
 ## 0.5 — 15/09/2026
 
 **Rappels**
