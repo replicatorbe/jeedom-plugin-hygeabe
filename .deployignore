@@ -1,0 +1,5 @@
+# Exclusions propres au plugin hygeabe, ajoutées à celles de deploy-plugin.sh.
+# Un motif rsync par ligne.
+
+# Jeux d'essai : outils de développement, inutiles côté Jeedom.
+tests/
