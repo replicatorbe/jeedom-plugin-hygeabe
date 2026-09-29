@@ -60,7 +60,25 @@
         "Ce rappel est désactivé.": "This reminder is disabled.",
         "Aucune action : ce rappel n'enverra rien.": "No action: this reminder will send nothing.",
         "Aucune collecte connue ne concerne ce rappel.": "No known collection matches this reminder.",
-        "Prochain envoi :": "Next send:"
+        "Prochain envoi :": "Next send:",
+        "Poubelles sorties": "Bins out",
+        "C’est fait": "Done",
+        "Pas encore sorties": "Not out yet",
+        "non envoyé : poubelles déjà sorties pour la collecte du": "not sent: bins already out for the collection of",
+        "ne partira pas : poubelles déjà sorties.": "will not fire: bins already out.",
+        "(envoyé malgré tout : le test ignore la case « Ne pas envoyer si c'est déjà fait », le vrai rappel, lui, ne partira pas)": "(sent anyway: the test ignores the \"Do not send if already done\" box, the real reminder will not fire)",
+        "collecte passée, confirmation « C’est fait » oubliée :": "collection passed, \"Done\" confirmation forgotten:",
+        "« C’est fait » ignoré : aucune collecte connue à venir.": "\"Done\" ignored: no known upcoming collection.",
+        "« C’est fait » ignoré : la prochaine collecte est dans": "\"Done\" ignored: the next collection is in",
+        "jours, aucun rappel ne la vise encore.": "days, no reminder targets it yet.",
+        "« C’est fait » déjà enregistré pour la collecte du": "\"Done\" already recorded for the collection of",
+        "poubelles sorties pour la collecte du": "bins out for the collection of",
+        "« Pas encore sorties » : aucune confirmation à annuler.": "\"Not out yet\": no confirmation to cancel.",
+        "confirmation annulée, les rappels reprennent pour la collecte du": "confirmation cancelled, reminders resume for the collection of",
+        "action de confirmation en échec :": "confirmation action failed:",
+        "action « C’est fait » en échec :": "\"Done\" action failed:",
+        "Aucune confirmation en cours : les rappels partent normalement.": "No confirmation pending: reminders fire as usual.",
+        "Poubelles déclarées sorties pour la collecte du": "Bins declared out for the collection of"
     },
     "plugins/hygeabe/core/ajax/hygeabe.ajax.php": {
         "401 - Accès non autorisé": "401 - Access denied",
@@ -155,7 +173,13 @@
         "L'adresse de cet équipement.": "The address of this device.",
         "Le nom de cet équipement.": "The name of this device.",
         "L'intercommunale qui dessert l'adresse.": "The operator serving the address.",
-        "Les jetons de Jeedom restent utilisables par-dessus : #[Objet][Équipement][Commande]#, variable(), etc.": "Jeedom's own tokens still work on top: #[Object][Device][Command]#, variable(), and so on."
+        "Les jetons de Jeedom restent utilisables par-dessus : #[Objet][Équipement][Commande]#, variable(), etc.": "Jeedom's own tokens still work on top: #[Object][Device][Command]#, variable(), and so on.",
+        "Quand c'est fait": "When it is done",
+        "Faire taire les rappels une fois les poubelles sorties.": "Silence the reminders once the bins are out.",
+        "La commande « C’est fait » de cet équipement déclare sorties les poubelles de la prochaine collecte ; « Pas encore sorties » annule. Les rappels où « Ne pas envoyer si c'est déjà fait » est cochée se taisent alors jusqu'à la collecte, puis tout repart de zéro. Appelez « C’est fait » depuis la tuile, un scénario, ou le bouton d'une notification JeedomConnect.": "This device's \"Done\" command declares the bins of the next collection out; \"Not out yet\" cancels. Reminders with \"Do not send if already done\" ticked then stay silent until the collection, after which everything starts afresh. Call \"Done\" from the tile, a scenario, or the button of a JeedomConnect notification.",
+        "Jouée à chaque confirmation « C’est fait », par exemple une notification « Merci, rappels coupés ». Les jetons des rappels y fonctionnent.": "Played on each \"Done\" confirmation, for instance a \"Thanks, reminders off\" notification. The reminder tokens work here.",
+        "Ajouter une action": "Add an action",
+        "Ces actions sont jouées une fois par collecte, au moment où « C’est fait » est pressé. Presser une deuxième fois ne les rejoue pas.": "These actions are played once per collection, when \"Done\" is pressed. Pressing it again does not replay them."
     },
     "plugins/hygeabe/desktop/js/hygeabe.js": {
         "Jeedom n\\'a pas répondu.": "Jeedom did not answer.",
@@ -224,6 +248,10 @@
         "jours avant": "days before",
         "Les deux cases à gauche d'une action : la jouer, et la jouer en parallèle des autres.": "The two boxes to the left of an action: play it, and play it in parallel with the others.",
         "Les deux cases à gauche d\\'une action : la jouer, et la jouer en parallèle des autres.": "The two boxes to the left of an action: play it, and play it in parallel with the others.",
-        "Supprimer ce rappel et toutes ses actions ?": "Delete this reminder and all its actions?"
+        "Supprimer ce rappel et toutes ses actions ?": "Delete this reminder and all its actions?",
+        "Le rappel se tait si les poubelles de la collecte qu'il annonce ont déjà été déclarées sorties avec la commande « C’est fait ». Décochée, il part toujours.": "The reminder stays silent if the bins of the collection it announces have already been declared out with the \"Done\" command. Unticked, it always fires.",
+        "Le rappel se tait si les poubelles de la collecte qu\\'il annonce ont déjà été déclarées sorties avec la commande « C’est fait ». Décochée, il part toujours.": "The reminder stays silent if the bins of the collection it announces have already been declared out with the \"Done\" command. Unticked, it always fires.",
+        "Ne pas envoyer si c'est déjà fait": "Do not send if already done",
+        "Ne pas envoyer si c\\'est déjà fait": "Do not send if already done"
     }
 }

@@ -22,6 +22,37 @@ function hygeabe_install() {
 
 function hygeabe_update() {
     hygeabe_migrateDisplay();
+    hygeabe_migrateCommands();
+}
+
+/*
+ * Donne aux adresses existantes les commandes apparues depuis leur création —
+ * « Poubelles sorties », « C’est fait », « Pas encore sorties » en 0.7. Le
+ * plugin ne les crée qu'à l'enregistrement d'un équipement : sans ce passage,
+ * elles n'apparaîtraient qu'au jour où quelqu'un rouvre l'adresse et clique
+ * sur Sauvegarder.
+ *
+ * Sans drapeau « une seule fois », contrairement à la migration de
+ * l'affichage : la création ne touche jamais une commande existante, la
+ * rejouer à chaque mise à jour ne coûte rien et rattrapera les commandes des
+ * versions suivantes. Les rappels, eux, n'ont rien à migrer : la case « Ne pas
+ * envoyer si c'est déjà fait » absente vaut 0 (hygeabe::cleanReminders).
+ *
+ * update() recalcule ensuite les commandes, pour que « Poubelles sorties »
+ * porte une valeur dès son apparition plutôt qu'au prochain cron horaire. Il
+ * ne relit le calendrier au service que s'il a vieilli, comme le cron.
+ */
+function hygeabe_migrateCommands() {
+    foreach (eqLogic::byType('hygeabe') as $eqLogic) {
+        try {
+            $eqLogic->ensureCommands();
+            if ($eqLogic->getIsEnable() == 1 && $eqLogic->isConfigured()) {
+                $eqLogic->update();
+            }
+        } catch (Throwable $e) {
+            log::add('hygeabe', 'error', 'migration ' . $eqLogic->getHumanName() . ' : ' . $e->getMessage());
+        }
+    }
 }
 
 /*

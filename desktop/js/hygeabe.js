@@ -255,6 +255,7 @@ function printEqLogic(_eqLogic) {
 
   hygeabeFractions = []
   hygeabeRenderReminders(_eqLogic)
+  hygeabeRenderDone(_eqLogic)
 
   if (isset(_eqLogic.id) && _eqLogic.id != '') {
     hygeabeLoadCollections(_eqLogic.id)
@@ -289,6 +290,7 @@ function hygeabeLoadCollections(_id) {
     hygeabeFractions = isset(result.fractions) ? result.fractions : []
     hygeabeRefreshFractionSelects()
     hygeabeShowNextReminders(isset(result.reminders) ? result.reminders : {})
+    hygeabeShowDoneState(isset(result.done) ? result.done : '')
 
     if (result.collections.length === 0) {
       message('{{Aucune collecte connue. Vérifiez l\'adresse, puis cliquez sur « Rafraîchir maintenant ».}}')
@@ -551,6 +553,8 @@ function hygeabeAddReminder(_reminder) {
   div += '</select>'
   div += ' {{à}} '
   div += '<input type="time" class="reminderAttr form-control input-sm" data-l1key="time" style="width:auto;display:inline-block;">'
+  div += '&nbsp;&nbsp;'
+  div += '<label class="checkbox-inline" style="padding-left:20px;" title="{{Le rappel se tait si les poubelles de la collecte qu\'il annonce ont déjà été déclarées sorties avec la commande « C’est fait ». Décochée, il part toujours.}}"><input type="checkbox" class="reminderAttr" data-l1key="skip_if_done"> {{Ne pas envoyer si c\'est déjà fait}}</label>'
   div += '<a class="btn btn-default btn-sm bt_hygeabeTestReminder" style="margin-left:10px;" title="{{Joue ce rappel tout de suite, sur la prochaine collecte concernée}}"><i class="fas fa-bell"></i> {{Tester}}</a>'
   div += '<a class="btn btn-danger btn-sm bt_hygeabeRemoveReminder pull-right"><i class="fas fa-minus-circle"></i> {{Supprimer}}</a>'
   div += '</div>'
@@ -578,7 +582,10 @@ function hygeabeAddReminder(_reminder) {
     id: init(reminder.id, ''),
     enable: (isset(reminder.enable) && reminder.enable != 1) ? '0' : '1',
     days: String(init(reminder.days, 1)),
-    time: init(reminder.time, '19:00')
+    time: init(reminder.time, '19:00'),
+    /* Absente d'un rappel écrit avant qu'elle existe : décochée, comme le
+       serveur la lit. */
+    skip_if_done: (isset(reminder.skip_if_done) && reminder.skip_if_done == 1) ? '1' : '0'
   }, '.reminderAttr')
   container.appendChild(wrapper)
   var nodes = Array.prototype.slice.call(wrapper.childNodes)
@@ -639,22 +646,64 @@ function hygeabeCollectReminders() {
     for (var j = 0; j < options.length; j++) {
       if (options[j].value !== '') { reminder.fractions.push(options[j].value) }
     }
-    reminder.actions = []
-    var lines = blocks[i].querySelectorAll('.hygeabeReminderAction')
-    for (var k = 0; k < lines.length; k++) {
-      var action = lines[k].getJeeValues('.expressionAttr')[0]
-      var pending = hygeabePendingOptions(lines[k])
-      if (pending !== null) {
-        /* Les champs du coeur ne sont pas à l'écran : on repose les options
-           connues, en laissant les deux cases de la ligne, elles bien présentes,
-           faire foi. */
-        action.options = Object.assign({}, pending, action.options)
-      }
-      reminder.actions.push(action)
-    }
+    reminder.actions = hygeabeCollectActions(blocks[i])
     reminders.push(reminder)
   }
   return reminders
+}
+
+/* Relève les lignes d'action d'un bloc : un rappel, ou la section « Quand
+   c'est fait ». */
+function hygeabeCollectActions(_block) {
+  var actions = []
+  if (_block === null) { return actions }
+  var lines = _block.querySelectorAll('.hygeabeReminderAction')
+  for (var k = 0; k < lines.length; k++) {
+    var action = lines[k].getJeeValues('.expressionAttr')[0]
+    var pending = hygeabePendingOptions(lines[k])
+    if (pending !== null) {
+      /* Les champs du coeur ne sont pas à l'écran : on repose les options
+         connues, en laissant les deux cases de la ligne, elles bien présentes,
+         faire foi. */
+      action.options = Object.assign({}, pending, action.options)
+    }
+    actions.push(action)
+  }
+  return actions
+}
+
+/* ============================================================ C'EST FAIT */
+
+/* Reconstruit les actions de confirmation. Même raison que pour les rappels :
+   le coeur ne réinitialise que les .eqLogicAttr, et les actions de l'adresse
+   précédente seraient enregistrées sur celle-ci. */
+function hygeabeRenderDone(_eqLogic) {
+  var block = document.getElementById('div_hygeabeDone')
+  if (block === null) { return }
+  block.querySelector('.hygeabeReminderActions').innerHTML = ''
+  hygeabeShowDoneState('')
+
+  var configuration = (isset(_eqLogic) && isset(_eqLogic.configuration)) ? _eqLogic.configuration : {}
+  var actions = isset(configuration.done_actions) ? configuration.done_actions : []
+
+  /* Pas de ligne vide d'office, contrairement à un rappel : un rappel sans
+     action ne sert à rien, une confirmation sans action coupe déjà les
+     rappels, c'est l'essentiel. */
+  hygeabeRendering = true
+  try {
+    for (var i = 0; i < actions.length; i++) {
+      hygeabeAddReminderAction(block, actions[i])
+    }
+  } finally {
+    hygeabeRendering = false
+  }
+}
+
+/* La phrase d'état envoyée par le serveur : « Poubelles déclarées sorties pour
+   la collecte du... ». */
+function hygeabeShowDoneState(_text) {
+  var span = document.getElementById('span_hygeabeDoneState')
+  if (span !== null) { span.textContent = _text }
 }
 
 /* Appelée par plugin.template.js juste avant l'enregistrement. Les rappels sont
@@ -663,6 +712,7 @@ function hygeabeCollectReminders() {
 function saveEqLogic(_eqLogic) {
   if (!isset(_eqLogic.configuration)) { _eqLogic.configuration = {} }
   _eqLogic.configuration.reminders = hygeabeCollectReminders()
+  _eqLogic.configuration.done_actions = hygeabeCollectActions(document.getElementById('div_hygeabeDone'))
   return _eqLogic
 }
 
@@ -772,7 +822,7 @@ var hygeabeContainer = document.getElementById('div_pageContainer') || document.
  * pas n'a pas pu être modifié à la main.
  */
 function hygeabeReminderEdited(_target) {
-  return _target.closest('#div_hygeabeReminders') !== null
+  return _target.closest('#div_hygeabeReminders, #div_hygeabeDone') !== null
       && !hygeabeRendering
       && _target.isVisible()
 }
@@ -914,7 +964,7 @@ hygeabeContainer.addEventListener('click', function (event) {
   }
 
   if (target = event.target.closest('.bt_hygeabeAddAction')) {
-    hygeabeAddReminderAction(target.closest('.hygeabeReminder'), {})
+    hygeabeAddReminderAction(target.closest('.hygeabeReminder, .hygeabeDone'), {})
     hygeabeMarkModified()
     return
   }

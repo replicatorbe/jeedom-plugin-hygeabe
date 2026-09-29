@@ -194,6 +194,8 @@ class hygeabe extends eqLogic {
         /* Les rappels arrivent du formulaire tels que le JS les a ramassés :
          * c'est ici, et pas à l'envoi, qu'on leur impose une forme. */
         $this->setConfiguration('reminders', self::cleanReminders($this->getConfiguration('reminders')));
+        // Même traitement pour les actions jouées à la confirmation « C’est fait ».
+        $this->setConfiguration('done_actions', self::cleanActions($this->getConfiguration('done_actions')));
 
         /*
          * Le service n'accepte qu'un entier positif. Un texte qui n'en contient
@@ -252,6 +254,10 @@ class hygeabe extends eqLogic {
         // Sans cela, une adresse recréée hériterait de la mémoire des rappels de
         // l'ancienne — des clés que plus aucun écran ne permet de voir.
         $this->forgetReminders();
+        // Même raison pour la confirmation « C’est fait » : un équipement recréé
+        // ne doit pas naître avec des poubelles déjà sorties.
+        $this->forgetDone();
+        message::removeAll(__CLASS__, $this->doneMessageKey());
         // Sans cela le message reste au centre de messages avec un identifiant
         // qu'aucun code ne pourra plus faire correspondre : impossible à effacer
         // autrement qu'à la main.
@@ -374,6 +380,49 @@ class hygeabe extends eqLogic {
         $this->addCmdIfMissing('refresh', 'Rafraîchir', 'action', 'other', array(
             'order' => $order++,
         ));
+
+        /*
+         * « Poubelles sorties » : l'état que posent les deux boutons qui
+         * suivent. Historisée comme « Collecte demain » : l'historique dit à
+         * quelle heure on a confirmé, et c'est ce qu'on veut relire le jour où
+         * un rappel a parlé alors qu'il n'aurait pas dû. Masquée comme les
+         * autres infos — elle sert aux scénarios et aux conditions.
+         *
+         * Pas de type générique : le coeur n'en connaît aucun qui décrive un
+         * geste ménager, et GENERIC_INFO/GENERIC_ACTION n'apprennent rien à
+         * personne.
+         */
+        $this->addCmdIfMissing('sortie_faite_etat', 'Poubelles sorties', 'info', 'binary', array(
+            'isVisible'    => 0,
+            'isHistorized' => 1,
+            'order'        => $order++,
+        ));
+        /*
+         * Les deux boutons, eux, restent visibles : c'est depuis la tuile, ou
+         * depuis le bouton d'une notification, qu'on les presse.
+         *
+         * L'apostrophe de « C’est fait » est typographique, et ce n'est pas une
+         * coquetterie : le coeur retire l'apostrophe droite des noms de commande
+         * (cleanComponanteName), la commande s'afficherait « Cest fait ».
+         */
+        $this->addCmdIfMissing('sortie_faite', 'C’est fait', 'action', 'other', array(
+            'order' => $order++,
+            'icon'  => 'fas fa-check',
+        ));
+        $this->addCmdIfMissing('sortie_annulee', 'Pas encore sorties', 'action', 'other', array(
+            'order' => $order++,
+            'icon'  => 'fas fa-undo',
+        ));
+    }
+
+    /*
+     * Rattrape les commandes apparues avec une version du plugin postérieure à
+     * la création de l'équipement. Le coeur ne les crée qu'à l'enregistrement
+     * (postSave) : sans cette porte, une adresse existante attendrait que
+     * quelqu'un l'ouvre et clique sur Sauvegarder. Appelée par hygeabe_update().
+     */
+    public function ensureCommands() {
+        $this->createCommands();
     }
 
     /* Les commandes propres à un type de déchet, créées au vu du calendrier. */
@@ -707,37 +756,55 @@ class hygeabe extends eqLogic {
 
     /* ========================================================= MISE À JOUR DES CMD */
 
-    private function refreshCommands($_calendar) {
-        $collections = isset($_calendar['collections']) ? $_calendar['collections'] : array();
-        $today = new DateTimeImmutable('today', self::timezone());
-
-        /*
-         * L'heure de bascule évite d'annoncer encore « prochaine collecte :
-         * aujourd'hui » à 18 h, alors que le camion est passé le matin. Elle ne
-         * vaut que pour « la prochaine » : la commande « Collecte aujourd'hui »,
-         * elle, doit rester vraie toute la journée, c'est sur elle que se
-         * déclenche le scénario qui fait rentrer les poubelles.
-         */
+    /*
+     * L'heure de bascule est-elle passée ? Elle évite d'annoncer encore
+     * « prochaine collecte : aujourd'hui » à 18 h, alors que le camion est
+     * passé le matin. Elle ne vaut que pour « la prochaine » : la commande
+     * « Collecte aujourd'hui », elle, doit rester vraie toute la journée, c'est
+     * sur elle que se déclenche le scénario qui fait rentrer les poubelles.
+     */
+    private function rolledOver($_now) {
         $rollover = (int) $this->getConfiguration('rollover_hour', 0);
-        $passed = ($rollover > 0 && (int) (new DateTimeImmutable('now', self::timezone()))->format('G') >= $rollover);
+        return ($rollover > 0 && (int) $_now->format('G') >= $rollover);
+    }
 
-        $next = null;
+    /*
+     * LA prochaine collecte, avec son nombre de jours : celle qu'annonce la
+     * tuile, et celle que « C’est fait » déclare sortie. Une seule définition
+     * pour les deux, sans quoi on confirmerait une collecte pendant que la
+     * tuile en affiche une autre.
+     */
+    private function upcomingCollection($_collections, $_now) {
+        $today = $_now->setTime(0, 0);
+        $passed = $this->rolledOver($_now);
+        foreach ($_collections as $collection) {
+            $days = self::daysUntil($collection['date'], $today);
+            if ($days < 0 || ($days === 0 && $passed)) {
+                continue;
+            }
+            $collection['days'] = $days;
+            return $collection;
+        }
+        return null;
+    }
+
+    /* $_now n'existe que pour le jeu d'essai : en service, c'est maintenant. */
+    private function refreshCommands($_calendar, $_now = null) {
+        $collections = isset($_calendar['collections']) ? $_calendar['collections'] : array();
+        $now = ($_now === null) ? new DateTimeImmutable('now', self::timezone()) : $_now;
+        $today = $now->setTime(0, 0);
+        $passed = $this->rolledOver($now);
+
+        $next = $this->upcomingCollection($collections, $now);
         $tomorrow = null;
         $today_collection = null;
         foreach ($collections as $collection) {
             $days = self::daysUntil($collection['date'], $today);
-            if ($days < 0) {
-                continue;
-            }
             if ($days === 0) {
                 $today_collection = $collection;
             }
             if ($days === 1) {
                 $tomorrow = $collection;
-            }
-            if ($next === null && !($days === 0 && $passed)) {
-                $next = $collection;
-                $next['days'] = $days;
             }
         }
 
@@ -787,6 +854,10 @@ class hygeabe extends eqLogic {
         $this->publishCmd('tomorrow', ($tomorrow !== null) ? 1 : 0);
         $this->publishCmd('tomorrow_fractions', ($tomorrow === null) ? '' : implode(', ', array_column($tomorrow['fractions'], 'name')));
         $this->publishCmd('operator', isset($_calendar['operator']) ? $_calendar['operator'] : '');
+        /* Recalculée ici, à chaque passage du cron horaire comme à chaque
+         * rafraîchissement : c'est ce qui fait retomber « Poubelles sorties »
+         * toute seule une fois la collecte passée, sans cron de remise à zéro. */
+        $this->publishCmd('sortie_faite_etat', $this->doneState($next, $now));
 
         $this->refreshFractionCommands($collections, $today, $passed, isset($_calendar['fractions']) ? $_calendar['fractions'] : array());
     }
@@ -905,31 +976,47 @@ class hygeabe extends eqLogic {
                 }
             }
 
-            $actions = array();
-            if (isset($reminder['actions']) && is_array($reminder['actions'])) {
-                foreach ($reminder['actions'] as $action) {
-                    if (!is_array($action) || trim((string) (isset($action['cmd']) ? $action['cmd'] : '')) === '') {
-                        // Une ligne d'action vide est une ligne que l'utilisateur
-                        // a ajoutée sans la remplir : la garder n'apporte rien.
-                        continue;
-                    }
-                    $actions[] = array(
-                        'cmd'     => trim((string) $action['cmd']),
-                        'options' => (isset($action['options']) && is_array($action['options'])) ? $action['options'] : array(),
-                    );
-                }
-            }
-
             $clean[] = array(
                 'id'        => $id,
                 'enable'    => (isset($reminder['enable']) && $reminder['enable'] == 1) ? 1 : 0,
                 'days'      => min(self::REMINDER_MAX_DAYS, max(0, (int) (isset($reminder['days']) ? $reminder['days'] : 1))),
                 'time'      => $time,
                 'fractions' => $fractions,
-                'actions'   => $actions,
+                'actions'   => self::cleanActions(isset($reminder['actions']) ? $reminder['actions'] : array()),
+                /*
+                 * « Ne pas envoyer si c'est déjà fait ». Absente, la case vaut 0 :
+                 * un rappel écrit avant qu'elle existe continue de partir comme
+                 * avant, sans migration — et c'est bien ce que son auteur avait
+                 * demandé en l'écrivant.
+                 */
+                'skip_if_done' => (isset($reminder['skip_if_done']) && $reminder['skip_if_done'] == 1) ? 1 : 0,
             );
         }
         return $clean;
+    }
+
+    /*
+     * Remet en forme une liste d'actions au format du sélecteur du coeur. Celle
+     * d'un rappel comme celle de la confirmation « C’est fait » : même
+     * sélecteur, mêmes règles, un seul endroit pour les écrire.
+     */
+    public static function cleanActions($_actions) {
+        $actions = array();
+        if (!is_array($_actions)) {
+            return $actions;
+        }
+        foreach ($_actions as $action) {
+            if (!is_array($action) || trim((string) (isset($action['cmd']) ? $action['cmd'] : '')) === '') {
+                // Une ligne d'action vide est une ligne que l'utilisateur
+                // a ajoutée sans la remplir : la garder n'apporte rien.
+                continue;
+            }
+            $actions[] = array(
+                'cmd'     => trim((string) $action['cmd']),
+                'options' => (isset($action['options']) && is_array($action['options'])) ? $action['options'] : array(),
+            );
+        }
+        return $actions;
     }
 
     /* Les rappels enregistrés, remis en forme. */
@@ -1030,7 +1117,7 @@ class hygeabe extends eqLogic {
      * insensible à une panne — un calendrier de la veille annonce la même
      * collecte que celui d'aujourd'hui.
      */
-    public function checkReminders() {
+    public function checkReminders($_now = null) {
         $reminders = $this->reminders();
         if (count($reminders) == 0) {
             return;
@@ -1040,8 +1127,9 @@ class hygeabe extends eqLogic {
         if (count($collections) == 0) {
             return;
         }
-        $now = new DateTimeImmutable('now', self::timezone());
-        $today = new DateTimeImmutable('today', self::timezone());
+        // $_now n'existe que pour le jeu d'essai : en service, c'est maintenant.
+        $now = ($_now === null) ? new DateTimeImmutable('now', self::timezone()) : $_now;
+        $today = $now->setTime(0, 0);
 
         foreach ($reminders as $reminder) {
             if ($reminder['enable'] != 1 || count($reminder['actions']) == 0) {
@@ -1053,6 +1141,23 @@ class hygeabe extends eqLogic {
             }
             $key = $this->reminderKey($reminder['id']);
             if (cache::byKey($key)->getValue('') === $due['date']) {
+                continue;
+            }
+            /*
+             * Poubelles déjà sorties pour CETTE collecte, et le rappel a demandé
+             * à se taire dans ce cas. Il est marqué comme traité, exactement
+             * comme s'il était parti : sans cela il serait réexaminé toutes les
+             * cinq minutes — une ligne de journal à chaque passage — et, surtout,
+             * un « Pas encore sorties » pressé à 19 h 10 ferait partir d'un coup
+             * les rappels de 18 h et de 19 h encore dans leur fenêtre de
+             * rattrapage : deux affichages TV à la suite pour annoncer la même
+             * chose. L'annulation vaut donc pour les rappels à venir.
+             */
+            if ($reminder['skip_if_done'] == 1 && $this->isDone($due['date'])) {
+                cache::set($key, $due['date'], self::REMINDER_MEMORY);
+                log::add(__CLASS__, 'info', $this->getHumanName() . ' ' . __('rappel', __FILE__) . ' '
+                       . self::reminderLabel($reminder) . ' ' . __('non envoyé : poubelles déjà sorties pour la collecte du', __FILE__)
+                       . ' ' . self::dateLabel($due['date']));
                 continue;
             }
             /*
@@ -1079,10 +1184,37 @@ class hygeabe extends eqLogic {
      * Rend la liste des échecs, pour que le bouton de test puisse les montrer.
      */
     private function runReminderActions($_reminder, $_due, $_report = true) {
+        $errors = $this->runActions($_reminder['actions'], $_due, __('action de rappel en échec :', __FILE__));
+
+        if (!$_report) {
+            return $errors;
+        }
+        /*
+         * Un rappel qui ne part plus doit se voir : le journal ne suffit pas, il
+         * n'est pas relu par celui qui attendait la notification. Le message
+         * disparaît de lui-même au premier rappel qui repasse.
+         */
+        $key = $this->reminderKey($_reminder['id']);
+        message::removeAll(__CLASS__, $key);
+        if (count($errors) > 0) {
+            message::add(__CLASS__, $this->getHumanName() . ' '
+                       . __('rappel en échec :', __FILE__) . ' ' . implode(' ; ', $errors), '', $key);
+        }
+        return $errors;
+    }
+
+    /*
+     * Joue une liste d'actions sur une collecte, jetons remplacés. Commun aux
+     * rappels et à la confirmation « C’est fait » : mêmes jetons, mêmes blocs
+     * refusés, même façon de ne pas laisser une action cassée retenir les
+     * suivantes. $_failure préfixe la ligne de journal d'un échec, pour qu'on
+     * sache lequel des deux a parlé.
+     */
+    private function runActions($_actions, $_due, $_failure) {
         $tags = $this->reminderTags($_due);
         $errors = array();
 
-        foreach ($_reminder['actions'] as $action) {
+        foreach ($_actions as $action) {
             $options = is_array($action['options']) ? $action['options'] : array();
             // Le coeur lit la case « désactivée » de la même façon, et la valeur
             // par défaut est « activée ».
@@ -1111,24 +1243,8 @@ class hygeabe extends eqLogic {
                 // notification cassée ne doit pas empêcher la lampe de s'allumer.
                 $errors[] = $action['cmd'] . ' — ' . $e->getMessage();
                 log::add(__CLASS__, 'error', $this->getHumanName() . ' '
-                       . __('action de rappel en échec :', __FILE__) . ' ' . $action['cmd']
-                       . ' — ' . $e->getMessage());
+                       . $_failure . ' ' . $action['cmd'] . ' — ' . $e->getMessage());
             }
-        }
-
-        if (!$_report) {
-            return $errors;
-        }
-        /*
-         * Un rappel qui ne part plus doit se voir : le journal ne suffit pas, il
-         * n'est pas relu par celui qui attendait la notification. Le message
-         * disparaît de lui-même au premier rappel qui repasse.
-         */
-        $key = $this->reminderKey($_reminder['id']);
-        message::removeAll(__CLASS__, $key);
-        if (count($errors) > 0) {
-            message::add(__CLASS__, $this->getHumanName() . ' '
-                       . __('rappel en échec :', __FILE__) . ' ' . implode(' ; ', $errors), '', $key);
         }
         return $errors;
     }
@@ -1227,10 +1343,11 @@ class hygeabe extends eqLogic {
      * depuis l'interface qu'un rappel est bien réglé : mal réglé, il ne produit
      * aucune erreur — il ne part simplement jamais.
      */
-    public function nextReminders() {
+    public function nextReminders($_now = null) {
         $calendar = $this->getCalendar();
         $collections = isset($calendar['collections']) ? $calendar['collections'] : array();
-        $now = new DateTimeImmutable('now', self::timezone());
+        // $_now n'existe que pour le jeu d'essai : en service, c'est maintenant.
+        $now = ($_now === null) ? new DateTimeImmutable('now', self::timezone()) : $_now;
         $next = array();
 
         foreach ($this->reminders() as $reminder) {
@@ -1260,6 +1377,12 @@ class hygeabe extends eqLogic {
                     . self::dateLabel($target->format('Y-m-d')) . ' '
                     . __('à', __FILE__) . ' ' . $target->format('H:i') . ' — '
                     . implode(', ', array_column($fractions, 'name'));
+                /* Sans cette mention, la ligne annoncerait un envoi qui n'aura
+                 * pas lieu : on croirait le rappel cassé en ne le voyant pas
+                 * arriver. */
+                if ($reminder['skip_if_done'] == 1 && $this->isDone($collection['date'])) {
+                    $next[$reminder['id']] .= ' — ' . __('ne partira pas : poubelles déjà sorties.', __FILE__);
+                }
                 break;
             }
         }
@@ -1334,11 +1457,194 @@ class hygeabe extends eqLogic {
                 if (count($errors) > 0) {
                     throw new Exception(implode(' ; ', $errors));
                 }
-                return self::dateLabel($due['date']) . ' — ' . implode(', ', array_column($fractions, 'name'));
+                $summary = self::dateLabel($due['date']) . ' — ' . implode(', ', array_column($fractions, 'name'));
+                /*
+                 * Le test passe outre « Ne pas envoyer si c'est déjà fait » : il
+                 * sert à vérifier que les actions arrivent, et le soir où l'on
+                 * veut s'en assurer est justement celui où les poubelles sont
+                 * sorties. Un bouton qui répondrait « rien envoyé » ne testerait
+                 * rien. Mais il le dit, pour qu'on n'en conclue pas que le vrai
+                 * rappel partira lui aussi.
+                 */
+                if ($reminder['skip_if_done'] == 1 && $this->isDone($due['date'])) {
+                    $summary .= ' ' . __('(envoyé malgré tout : le test ignore la case « Ne pas envoyer si c\'est déjà fait », le vrai rappel, lui, ne partira pas)', __FILE__);
+                }
+                return $summary;
             }
             throw new Exception(__('Aucune collecte connue ne concerne ce rappel : il n\'y a rien à envoyer.', __FILE__));
         }
         throw new Exception(__('Rappel introuvable : enregistrez l\'équipement avant de le tester.', __FILE__));
+    }
+
+    /* ============================================================ C’EST FAIT */
+
+    /*
+     * « C’est fait » dit : les poubelles de la prochaine collecte sont dehors.
+     * Ce qu'on retient n'est pas un booléen mais la DATE de cette collecte.
+     *
+     * Un booléen aurait besoin de quelqu'un pour le remettre à zéro — un cron de
+     * plus, qui tomberait un jour à côté ou pas du tout, et le rappel de la
+     * semaine suivante se tairait pour une poubelle sortie sept jours plus tôt.
+     * Une date se périme toute seule : elle ne concerne que sa collecte, et
+     * cesse de compter dès que celle-ci est passée. Le rappel compare sa propre
+     * collecte à cette date, rien d'autre.
+     *
+     * Rangée en cache, comme la mémoire des rappels, et non dans la
+     * configuration : l'y écrire enregistrerait l'équipement, donc relancerait
+     * postSave, et écraserait au passage une saisie en cours dans la page.
+     * Sans expiration : une collecte peut être à plus de quinze jours (sapins,
+     * encombrants), la date est effacée quand elle est passée, pas avant.
+     */
+    private function doneKey() {
+        return 'hygeabe::done::' . $this->getId();
+    }
+
+    /* Le message d'échec des actions de confirmation, au centre de messages. */
+    private function doneMessageKey() {
+        return 'hygeabe::doneActions::' . $this->getId();
+    }
+
+    /* La collecte confirmée sortie, au format 2026-09-17, ou une chaîne vide. */
+    public function doneDate() {
+        return (string) cache::byKey($this->doneKey())->getValue('');
+    }
+
+    /* Les poubelles de la collecte de ce jour-là sont-elles déclarées sorties ? */
+    public function isDone($_date) {
+        $done = $this->doneDate();
+        return ($done !== '' && $done === $_date);
+    }
+
+    private function forgetDone() {
+        cache::delete($this->doneKey());
+    }
+
+    /*
+     * La valeur de « Poubelles sorties » : 1 si la collecte confirmée est
+     * celle qu'annonce la tuile. Une confirmation dont la collecte est passée
+     * — même règle que la tuile, heure de bascule comprise — est oubliée ici :
+     * c'est la retombée à 0 du lendemain, sans rien d'autre à programmer.
+     *
+     * Une date à venir mais qui n'est plus la prochaine (le service a inséré une
+     * collecte plus tôt) est gardée : elle vaut toujours pour SA collecte, et
+     * l'info repassera à 1 quand celle-ci redeviendra la prochaine.
+     */
+    private function doneState($_next, $_now) {
+        $done = $this->doneDate();
+        if ($done === '') {
+            return 0;
+        }
+        $days = self::daysUntil($done, $_now->setTime(0, 0));
+        if ($days < 0 || ($days === 0 && $this->rolledOver($_now))) {
+            $this->forgetDone();
+            log::add(__CLASS__, 'debug', $this->getHumanName() . ' '
+                   . __('collecte passée, confirmation « C’est fait » oubliée :', __FILE__) . ' ' . $done);
+            return 0;
+        }
+        return ($_next !== null && $_next['date'] === $done) ? 1 : 0;
+    }
+
+    /*
+     * Le bouton « C’est fait ». Rend vrai si une collecte a été marquée.
+     *
+     * Aucune exception quand il n'y a rien à marquer : ce bouton est pressé
+     * depuis une notification sur un téléphone, et une erreur n'y ferait
+     * qu'afficher un message incompréhensible. Le journal dit pourquoi rien
+     * n'a été fait.
+     */
+    public function confirmDone($_now = null) {
+        // $_now n'existe que pour le jeu d'essai : en service, c'est maintenant.
+        $now = ($_now === null) ? new DateTimeImmutable('now', self::timezone()) : $_now;
+        $calendar = $this->getCalendar();
+        $next = $this->upcomingCollection(isset($calendar['collections']) ? $calendar['collections'] : array(), $now);
+
+        if ($next === null) {
+            log::add(__CLASS__, 'warning', $this->getHumanName() . ' '
+                   . __('« C’est fait » ignoré : aucune collecte connue à venir.', __FILE__));
+            return false;
+        }
+        /*
+         * Au-delà d'une semaine, aucun rappel ne vise encore cette collecte —
+         * c'est le plus loin qu'un rappel puisse partir. Confirmer si tôt est
+         * presque sûrement un doigt qui a glissé, et ferait taire d'avance tous
+         * les rappels d'une collecte lointaine.
+         */
+        if ($next['days'] > self::REMINDER_MAX_DAYS) {
+            log::add(__CLASS__, 'warning', $this->getHumanName() . ' '
+                   . __('« C’est fait » ignoré : la prochaine collecte est dans', __FILE__) . ' ' . $next['days'] . ' '
+                   . __('jours, aucun rappel ne la vise encore.', __FILE__));
+            return false;
+        }
+
+        $label = self::dateLabel($next['date']) . ' — ' . implode(', ', array_column($next['fractions'], 'name'));
+        /*
+         * Déjà confirmée : on ne rejoue pas les actions. Deux pressions sur le
+         * bouton n'ont pas à envoyer deux « Merci » — et une action de
+         * confirmation qui appellerait elle-même « C’est fait » tournerait en
+         * rond sans cette garde.
+         */
+        if ($this->isDone($next['date'])) {
+            log::add(__CLASS__, 'info', $this->getHumanName() . ' '
+                   . __('« C’est fait » déjà enregistré pour la collecte du', __FILE__) . ' ' . $label);
+            $this->publishCmd('sortie_faite_etat', 1);
+            return true;
+        }
+
+        cache::set($this->doneKey(), $next['date'], 0);
+        $this->publishCmd('sortie_faite_etat', 1);
+        log::add(__CLASS__, 'info', $this->getHumanName() . ' '
+               . __('poubelles sorties pour la collecte du', __FILE__) . ' ' . $label);
+
+        $this->runDoneActions(self::describeDue($next, $next['fractions'], $now->setTime(0, 0)));
+        return true;
+    }
+
+    /*
+     * Le bouton « Pas encore sorties » : le doigt a glissé. Les rappels à venir
+     * de la collecte reprennent ; ceux qui se sont déjà tus le restent — voir
+     * checkReminders().
+     */
+    public function cancelDone() {
+        $done = $this->doneDate();
+        if ($done === '') {
+            log::add(__CLASS__, 'info', $this->getHumanName() . ' '
+                   . __('« Pas encore sorties » : aucune confirmation à annuler.', __FILE__));
+        } else {
+            $this->forgetDone();
+            log::add(__CLASS__, 'info', $this->getHumanName() . ' '
+                   . __('confirmation annulée, les rappels reprennent pour la collecte du', __FILE__) . ' ' . self::dateLabel($done));
+        }
+        $this->publishCmd('sortie_faite_etat', 0);
+    }
+
+    /*
+     * Les actions de la section « Quand c'est fait » : un « Merci, rappels
+     * coupés » sur le téléphone, la lampe du hall qu'on éteint. Même moteur que
+     * les rappels, donc mêmes jetons et mêmes blocs refusés : elles sont jouées
+     * dans la requête du bouton, qu'une « Pause » retiendrait tout autant.
+     */
+    private function runDoneActions($_due) {
+        $actions = self::cleanActions($this->getConfiguration('done_actions'));
+        $key = $this->doneMessageKey();
+        message::removeAll(__CLASS__, $key);
+        if (count($actions) == 0) {
+            return array();
+        }
+        $errors = $this->runActions($actions, $_due, __('action de confirmation en échec :', __FILE__));
+        if (count($errors) > 0) {
+            message::add(__CLASS__, $this->getHumanName() . ' '
+                       . __('action « C’est fait » en échec :', __FILE__) . ' ' . implode(' ; ', $errors), '', $key);
+        }
+        return $errors;
+    }
+
+    /* L'état en une phrase, pour l'onglet Rappels. */
+    public function doneSummary() {
+        $done = $this->doneDate();
+        if ($done === '') {
+            return __('Aucune confirmation en cours : les rappels partent normalement.', __FILE__);
+        }
+        return __('Poubelles déclarées sorties pour la collecte du', __FILE__) . ' ' . self::dateLabel($done) . '.';
     }
 
     /* ================================================================= MESSAGES */
@@ -1762,6 +2068,17 @@ class hygeabeCmd extends cmd {
                 if ($eqLogic->getRefreshError() != '') {
                     throw new Exception($eqLogic->getRefreshError());
                 }
+                return true;
+
+            /* Les deux boutons de la confirmation. Le calcul est dans l'équipement :
+             * la commande n'est qu'une porte, que ce soit la tuile, un scénario
+             * ou le bouton d'une notification qui la pousse. */
+            case 'sortie_faite':
+                $eqLogic->confirmDone();
+                return true;
+
+            case 'sortie_annulee':
+                $eqLogic->cancelDone();
                 return true;
         }
         return true;

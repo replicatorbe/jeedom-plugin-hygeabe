@@ -70,6 +70,9 @@ coupées en deux tronçons. Le numéro départage.
 | Déchets à sortir ce soir | info / string | les fractions de la collecte de demain, vide s'il n'y en a pas |
 | Intercommunale | info / string | `HYGEA`, `TIBI`... le nom renvoyé par le service |
 | Rafraîchir | action | recalcule les commandes, et relit le calendrier s'il a vieilli |
+| Poubelles sorties | info / binary | `1` quand « C’est fait » a été pressé pour la prochaine collecte ; retombe seule à `0` une fois la collecte passée. Historisée |
+| C’est fait | action | déclare sorties les poubelles de la prochaine collecte — voir la section « C’est fait » plus bas |
+| Pas encore sorties | action | annule la confirmation, les rappels à venir reprennent |
 
 Avec l'option « commandes par fraction », chaque type de déchet ajoute :
 
@@ -128,6 +131,7 @@ scénario. Un rappel dit trois choses : **quand**, **pour quels déchets**, et
 | Quand | `le jour même`, `la veille`, jusqu'à `une semaine avant`, et l'heure |
 | Déchets concernés | rien de sélectionné : le rappel part pour n'importe quelle collecte. Un ou plusieurs déchets : il ne part que pour eux |
 | Actions | une ou plusieurs commandes d'action de votre Jeedom — notification, SMS, message vocal, lampe — ou un bloc (message, scénario, variable) |
+| Ne pas envoyer si c'est déjà fait | le rappel se tait si les poubelles de sa collecte ont été déclarées sorties avec « C’est fait ». Décochée — c'est le cas de tout rappel écrit avant la 0.7 —, il part toujours |
 
 Plusieurs rappels peuvent cohabiter sur la même adresse : « la veille à 19 h pour
 tout », « le jour même à 6 h 30 pour les encombrants », « le jour même à 19 h
@@ -201,6 +205,86 @@ une demande**, **Rapport** et **Export historique**, qui retiennent le cron
 pendant des secondes ou des minutes. Le sont aussi ceux qui n'ont de sens que
 dans un scénario : **Stop**, **Ajouter un log**, **Retourner un texte**,
 **Icône**, **Tag**.
+
+## « C’est fait » : faire taire les rappels
+
+Quatre rappels le même soir, c'est utile tant que la poubelle est dans le
+garage, et pénible une fois qu'elle est sur le trottoir. Chaque adresse porte
+donc deux boutons :
+
+- **C’est fait** déclare sorties les poubelles de la **prochaine collecte** —
+  celle qu'annonce la tuile : la collecte du jour tant que l'heure de bascule
+  n'est pas passée, la suivante ensuite ;
+- **Pas encore sorties** annule, si le doigt a glissé.
+
+Les rappels où la case **Ne pas envoyer si c'est déjà fait** est cochée se
+taisent alors jusqu'à la collecte. Les autres partent comme d'habitude : cochez
+la case là où le silence est bienvenu, laissez-la vide pour ce qui doit passer
+quoi qu'il arrive.
+
+### Rien à remettre à zéro
+
+Le plugin ne retient pas « c'est fait », mais **la date de la collecte** pour
+laquelle c'est fait. Dès que cette collecte est passée — le lendemain à minuit,
+ou à l'heure de bascule le jour même si vous en avez réglé une —, la
+confirmation ne vaut plus rien et la commande **Poubelles sorties** retombe
+d'elle-même à `0` au recalcul horaire suivant. La collecte d'après repart de
+zéro, sans scénario ni cron de remise à zéro.
+
+Si vos collectes tombent deux jours de suite, réglez une **heure de bascule** :
+sans elle, la collecte du jour reste « la prochaine » jusqu'à minuit, et un
+« C’est fait » pressé le soir viserait celle du jour au lieu de celle du
+lendemain.
+
+### Les cas particuliers
+
+- **Rien de prévu** : pressé alors qu'aucune collecte n'est connue, ou que la
+  prochaine est à plus d'une semaine — aucun rappel ne peut encore la viser —,
+  « C’est fait » ne retient rien et le dit dans le log `hygeabe`. Aucune erreur
+  n'est renvoyée au téléphone.
+- **Deux pressions** : la seconde ne change rien et ne rejoue pas les actions
+  de confirmation.
+- **Annulation** : les rappels **à venir** reprennent. Ceux qui se sont tus
+  pendant la confirmation ne repartent pas en rafale : annuler à 19 h 10 ne
+  fait pas tomber d'un coup les rappels de 18 h et de 19 h.
+- **Tester** envoie le rappel même si les poubelles sont déclarées sorties — le
+  test sert à voir arriver le message, case ou pas — et le signale dans sa
+  réponse. La ligne **Prochain envoi**, elle, indique « ne partira pas :
+  poubelles déjà sorties » pour un rappel qui se taira.
+
+### Quand c'est fait
+
+Sous les rappels, la section **Quand c'est fait** accueille des actions jouées
+au moment où l'on presse « C’est fait » : une notification « Merci, rappels
+coupés », une lampe qu'on éteint. Même sélecteur, mêmes jetons (`#dechets#`,
+`#collecte#`, `#jour#`...) et mêmes blocs refusés que pour un rappel. Elles ne
+sont jouées qu'une fois par collecte. La section rappelle aussi où en est la
+confirmation en cours.
+
+### Exemple complet
+
+Le soir de la veille :
+
+| Rappel | Action | Ne pas envoyer si c'est déjà fait |
+|---|---|---|
+| la veille à 17:00 | notification JeedomConnect avec un bouton « C’est fait » | décochée |
+| la veille à 18:00 | affichage sur la TV | cochée |
+| la veille à 19:00 | affichage sur la TV | cochée |
+| la veille à 19:30 | affichage sur la TV | cochée |
+| la veille à 19:45 | annonce vocale | cochée |
+
+Dans **Quand c'est fait** : une notification `Merci, #dechets# sont dehors pour
+#jour#.`
+
+À 17 h, la notification arrive. Pour son bouton, faites appeler par
+JeedomConnect la commande action **C’est fait** de l'adresse,
+`#[Maison][Collectes][C’est fait]#` — c'est une commande d'action ordinaire,
+que tout ce qui sait déclencher une commande Jeedom peut presser : une
+notification JeedomConnect à réponse, un widget, un scénario, un bouton
+physique. Une fois pressée, la TV et l'annonce vocale se taisent pour la
+soirée ; sans réponse, elles se relaient jusqu'à 19 h 45. Le lendemain,
+**Poubelles sorties** retombe à `0` et tout recommence pour la collecte
+suivante.
 
 ## Utilisation dans un scénario
 
@@ -279,3 +363,5 @@ Les journaux sont dans Analyse → Logs, log `hygeabe`.
 | Un rappel part mais rien n'arrive | l'action a échoué : le centre de messages et le log `hygeabe` donnent la commande fautive et la raison |
 | « bloc inutilisable dans un rappel » | l'action désigne un bloc qui retiendrait le cron de Jeedom, ou qui n'a de sens que dans un scénario ; passez par un scénario |
 | Un rappel est parti en retard | Jeedom était éteint à l'heure dite ; il rattrape jusqu'à deux heures après, pas au-delà |
+| Un rappel ne part plus alors que rien n'est sorti | « C’est fait » a été pressé : la ligne « Prochain envoi » l'indique, et le log `hygeabe` dit « non envoyé : poubelles déjà sorties ». « Pas encore sorties » rétablit les rappels à venir |
+| « C’est fait » ne fait rien | aucune collecte connue, ou la prochaine est à plus d'une semaine : le log `hygeabe` le dit |

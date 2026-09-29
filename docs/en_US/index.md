@@ -69,6 +69,9 @@ sections. The house number tells them apart.
 | Waste to take out tonight | info / string | tomorrow's waste types, empty if there is none |
 | Operator | info / string | `HYGEA`, `TIBI`... the name returned by the service |
 | Refresh | action | recomputes the commands, and reads the calendar again if it has aged |
+| Bins out | info / binary | `1` once "Done" has been pressed for the next collection; falls back to `0` on its own once the collection has passed. Logged |
+| Done | action | declares the bins of the next collection out — see the "Done" section below |
+| Not out yet | action | cancels the confirmation, the upcoming reminders resume |
 
 With the "commands per waste type" option, each waste type adds:
 
@@ -127,6 +130,7 @@ scenario. A reminder says three things: **when**, **for which waste**, and
 | When | `on the day itself`, `the day before`, up to `a week before`, and the time |
 | Waste concerned | nothing selected: the reminder fires for any collection. One or more types: it only fires for those |
 | Actions | one or more action commands of your Jeedom — notification, SMS, spoken message, lamp — or a block (message, scenario, variable) |
+| Do not send if already done | the reminder stays silent if the bins of its collection have been declared out with "Done". Unticked — as is every reminder written before 0.7 —, it always fires |
 
 Several reminders can live on the same address: "the day before at 7 pm for
 everything", "on the day at 6:30 am for bulky items", "on the day at 7 pm as a
@@ -197,6 +201,82 @@ For the same reason five blocks are refused: **Wait**, **Pause**, **Ask**,
 **Report** and **Export history**, which hold the cron for seconds or minutes.
 So are those that only make sense inside a scenario: **Stop**, **Add a log**,
 **Return a text**, **Icon**, **Tag**.
+
+## "Done": silencing the reminders
+
+Four reminders on the same evening are useful while the bin is in the garage,
+and a nuisance once it is on the pavement. Each address therefore carries two
+buttons:
+
+- **Done** declares the bins of the **next collection** out — the one the tile
+  announces: today's collection until the switchover hour has passed, the
+  following one after that;
+- **Not out yet** cancels, if a finger slipped.
+
+Reminders with the **Do not send if already done** box ticked then stay silent
+until the collection. The others fire as usual: tick the box where silence is
+welcome, leave it empty for what must go through no matter what.
+
+### Nothing to reset
+
+The plugin does not remember "done", but **the date of the collection** it is
+done for. As soon as that collection has passed — the next day at midnight, or
+at the switchover hour on the day itself if you set one —, the confirmation no
+longer counts and the **Bins out** command falls back to `0` on its own at the
+next hourly recomputation. The following collection starts afresh, with no
+scenario or reset cron.
+
+If your collections fall on two consecutive days, set a **switchover hour**:
+without it, today's collection stays "the next one" until midnight, and a
+"Done" pressed in the evening would target today's collection instead of
+tomorrow's.
+
+### Special cases
+
+- **Nothing planned**: pressed while no collection is known, or while the next
+  one is more than a week away — no reminder can target it yet —, "Done"
+  records nothing and says so in the `hygeabe` log. No error is sent back to
+  the phone.
+- **Pressed twice**: the second press changes nothing and does not replay the
+  confirmation actions.
+- **Cancelling**: **upcoming** reminders resume. Those that stayed silent during
+  the confirmation do not fire in a burst: cancelling at 7:10 pm does not
+  suddenly send the 6 pm and 7 pm reminders.
+- **Test** sends the reminder even if the bins are declared out — the test is
+  there to see the message arrive, box or not — and says so in its answer. The
+  **Next send** line shows "will not fire: bins already out" for a reminder
+  that will stay silent.
+
+### When it is done
+
+Below the reminders, the **When it is done** section holds actions played when
+"Done" is pressed: a "Thanks, reminders off" notification, a lamp switched off.
+Same selector, same tokens (`#dechets#`, `#collecte#`, `#jour#`...) and same
+refused blocks as a reminder. They are played only once per collection. The
+section also shows the confirmation currently in force.
+
+### Full example
+
+The evening before:
+
+| Reminder | Action | Do not send if already done |
+|---|---|---|
+| the day before at 17:00 | JeedomConnect notification with a "Done" button | unticked |
+| the day before at 18:00 | display on the TV | ticked |
+| the day before at 19:00 | display on the TV | ticked |
+| the day before at 19:30 | display on the TV | ticked |
+| the day before at 19:45 | spoken announcement | ticked |
+
+In **When it is done**: a notification `Thanks, #dechets# are out for #jour#.`
+
+At 5 pm the notification arrives. For its button, have JeedomConnect call the
+address's **Done** action command, `#[Home][Collections][Done]#` — it is an
+ordinary action command, which anything able to trigger a Jeedom command can
+press: a JeedomConnect notification with answers, a widget, a scenario, a
+physical button. Once pressed, the TV and the spoken announcement stay silent
+for the evening; without an answer they take turns until 7:45 pm. The next day,
+**Bins out** falls back to `0` and everything starts again for the following
+collection.
 
 ## Using it in a scenario
 
@@ -269,3 +349,5 @@ Logs are under Analysis → Logs, log `hygeabe`.
 | A reminder fires but nothing arrives | the action failed: the message centre and the `hygeabe` log name the faulty command and the reason |
 | "block unusable in a reminder" | the action points at a block that would hold up Jeedom's cron, or that only makes sense inside a scenario; use a scenario instead |
 | A reminder fired late | Jeedom was off at the due time; it catches up for up to two hours, no further |
+| A reminder no longer fires although nothing is out | "Done" was pressed: the "Next send" line says so, and the `hygeabe` log says "not sent: bins already out". "Not out yet" restores the upcoming reminders |
+| "Done" does nothing | no known collection, or the next one is more than a week away: the `hygeabe` log says so |

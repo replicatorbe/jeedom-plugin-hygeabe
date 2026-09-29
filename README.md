@@ -15,6 +15,10 @@ Le calendrier des collectes de déchets d'une adresse belge, dans Jeedom.
   de Jeedom, notification, SMS, message vocal ou lampe. Le message accepte des
   jetons (`#dechets#`, `#collecte#`...), un bouton d'essai l'envoie pour de vrai,
   et une ligne annonce le prochain départ.
+- **« C’est fait » pour faire taire les rappels.** Un bouton, pressable depuis
+  la tuile ou une notification, déclare les poubelles sorties : les rappels qui
+  le demandent se taisent jusqu'à la collecte, puis tout repart de zéro tout
+  seul.
 - **Une commande par poubelle, en option.** Pour les scénarios qui ne
   s'intéressent qu'aux PMC ou qu'aux papiers-cartons.
 - **Un widget dédié.** La date en gros, une étiquette par type de déchet, aux

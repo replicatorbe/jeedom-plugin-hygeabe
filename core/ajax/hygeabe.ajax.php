@@ -114,6 +114,9 @@ try {
             /* Ce que chaque rappel enregistré enverra, et quand : un rappel mal
              * réglé ne lève aucune erreur, il ne part jamais. */
             'reminders'   => $eqLogic->nextReminders(),
+            /* Où en est « C’est fait » : sans cette ligne, rien dans la page ne
+             * dirait pourquoi les rappels cochés se taisent ce soir. */
+            'done'        => $eqLogic->doneSummary(),
         ));
     }
 

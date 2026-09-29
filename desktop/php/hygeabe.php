@@ -280,6 +280,25 @@ $eqLogics = eqLogic::byType($plugin->getId());
 
 					<a class="btn btn-default btn-sm" id="bt_hygeabeAddReminder"><i class="fas fa-plus-circle"></i> {{Ajouter un rappel}}</a>
 
+					<!-- La confirmation « C’est fait » : ses actions vivent à côté des
+					     rappels qu'elle fait taire, pas dans un onglet à part où l'on ne
+					     ferait pas le lien. -->
+					<fieldset style="margin-top:20px;">
+						<legend><i class="fas fa-check"></i> {{Quand c'est fait}}</legend>
+						<div class="alert alert-info" style="margin-bottom:10px;">
+							<b>{{Faire taire les rappels une fois les poubelles sorties.}}</b>
+							{{La commande « C’est fait » de cet équipement déclare sorties les poubelles de la prochaine collecte ; « Pas encore sorties » annule. Les rappels où « Ne pas envoyer si c'est déjà fait » est cochée se taisent alors jusqu'à la collecte, puis tout repart de zéro. Appelez « C’est fait » depuis la tuile, un scénario, ou le bouton d'une notification JeedomConnect.}}
+						</div>
+						<form class="form-horizontal">
+							<div class="hygeabeDone" id="div_hygeabeDone">
+								<div class="hygeabeReminderActions"></div>
+								<a class="btn btn-default btn-xs bt_hygeabeAddAction" title="{{Jouée à chaque confirmation « C’est fait », par exemple une notification « Merci, rappels coupés ». Les jetons des rappels y fonctionnent.}}"><i class="fas fa-plus"></i> {{Ajouter une action}}</a>
+								<span class="help-block" style="margin:6px 0 0 0;">{{Ces actions sont jouées une fois par collecte, au moment où « C’est fait » est pressé. Presser une deuxième fois ne les rejoue pas.}}</span>
+								<span class="help-block" id="span_hygeabeDoneState" style="margin:6px 0 0 0;font-style:italic;"></span>
+							</div>
+						</form>
+					</fieldset>
+
 					<fieldset style="margin-top:20px;">
 						<legend><i class="fas fa-code"></i> {{Jetons utilisables dans le titre et le message}}</legend>
 						<div class="table-responsive">

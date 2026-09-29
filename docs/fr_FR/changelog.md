@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7 — 29/09/2026
+
+**« C’est fait »**
+
+- Trois nouvelles commandes par adresse : **C’est fait** déclare sorties les
+  poubelles de la prochaine collecte, **Pas encore sorties** annule, et
+  **Poubelles sorties** (info binaire, historisée) dit où l'on en est.
+- Une case **Ne pas envoyer si c'est déjà fait** dans chaque rappel : la veille
+  au soir, la TV et l'annonce vocale se taisent dès que quelqu'un a confirmé.
+  Les rappels existants gardent la case décochée et partent comme avant.
+- Le plugin retient la date de la collecte confirmée, pas un simple « oui » :
+  la confirmation tombe d'elle-même une fois la collecte passée, sans scénario
+  ni remise à zéro.
+- Une section **Quand c'est fait**, sous les rappels, pour jouer des actions à
+  la confirmation — une notification « Merci, rappels coupés » — avec les mêmes
+  jetons que les rappels.
+- La ligne **Prochain envoi** signale un rappel qui se taira, et **Tester**
+  dit quand il envoie malgré une confirmation.
+- Les adresses existantes reçoivent les nouvelles commandes à la mise à jour du
+  plugin.
+
 ## 0.6 — 24/09/2026
 
 - Les étiquettes de déchets restent lisibles quand le service ne donne pas de

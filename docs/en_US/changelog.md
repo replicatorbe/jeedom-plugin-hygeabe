@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7 — 29/09/2026
+
+**"Done"**
+
+- Three new commands per address: **Done** declares the bins of the next
+  collection out, **Not out yet** cancels, and **Bins out** (binary info,
+  logged) tells where things stand.
+- A **Do not send if already done** box on each reminder: on the evening
+  before, the TV and the spoken announcement stay silent as soon as someone has
+  confirmed. Existing reminders keep the box unticked and fire as before.
+- The plugin remembers the date of the confirmed collection, not a mere "yes":
+  the confirmation lapses on its own once the collection has passed, with no
+  scenario and no reset.
+- A **When it is done** section, below the reminders, to play actions on
+  confirmation — a "Thanks, reminders off" notification — with the same tokens
+  as the reminders.
+- The **Next send** line flags a reminder that will stay silent, and **Test**
+  says when it sends despite a confirmation.
+- Existing addresses receive the new commands when the plugin is updated.
+
 ## 0.6 — 24/09/2026
 
 - Waste labels stay readable when the service provides no text colour: it is
