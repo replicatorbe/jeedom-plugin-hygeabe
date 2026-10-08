@@ -14,6 +14,9 @@ date_default_timezone_set('Europe/Brussels');
 
 function __($_text, $_file = null) { return $_text; }
 function secureXSS($_text) { return $_text; }
+function is_json($_string, $_default = null) {
+    return is_string($_string) && is_array(json_decode($_string, true));
+}
 
 class config {
     public static $values = array();

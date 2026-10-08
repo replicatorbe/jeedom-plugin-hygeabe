@@ -316,5 +316,41 @@ check('sans bascule, le jour même à 20 h : vise encore la collecte du jour',
       $eq->confirmDone(at($collecte, '20:00')) && $eq->doneDate() === $collecte->format('Y-m-d'), true);
 sent();
 
+/* ===================================================== MESSAGE JSON (TV) */
+section('Jetons dans un message JSON (Notifier (JSON) de Jeedom TV)');
+
+$jtags = array('#dechets#' => 'PMC, Déchets résiduels', '#jour#' => 'jeudi');
+$objet = array('id' => 'poubelles', 'title' => 'Poubelles #jour#', 'message' => 'Sortir : #dechets#',
+               'duration' => 60, 'extra' => array('note' => '#dechets#'));
+$rendu = hygeabe::applyTags($objet, $jtags);
+check('objet : le message est remplacé', $rendu['message'], 'Sortir : PMC, Déchets résiduels');
+check('objet : le titre aussi', $rendu['title'], 'Poubelles jeudi');
+check('objet : à toute profondeur', $rendu['extra']['note'], 'PMC, Déchets résiduels');
+check('objet : un entier reste un entier', $rendu['duration'], 60);
+check('objet : les clés ne bougent pas', array_keys($rendu), array_keys($objet));
+check('texte simple : inchangé dans son principe', hygeabe::applyTags('Sortir : #dechets#', $jtags), 'Sortir : PMC, Déchets résiduels');
+check('ni texte ni tableau : rendu tel quel', hygeabe::applyTags(null, $jtags), null);
+
+$chaine = '{"id":"poubelles","message":"Sortir : #dechets#","duration":60}';
+$guillemet = array('#dechets#' => 'Verre "blanc"');
+$json = json_decode(hygeabe::applyTags($chaine, $guillemet), true);
+check('chaîne JSON : un guillemet dans la valeur ne casse pas le JSON', is_array($json), true);
+check('chaîne JSON : la valeur est intacte une fois relue', $json['message'], 'Sortir : Verre "blanc"');
+
+/* Un rappel complet, message enregistré comme objet : ce que reçoit la commande. */
+$tv = new hygeabe();
+$tv->configuration = array('rollover_hour' => 0, 'per_fraction' => 0, 'done_actions' => array(),
+    'reminders' => array(array('id' => 'tv', 'enable' => 1, 'days' => 1, 'time' => '18:00', 'fractions' => array(),
+        'actions' => array(array('cmd' => '#210#', 'options' => array('message' => array(
+            'id' => 'poubelles', 'title' => 'Poubelles demain', 'message' => 'Sortir : #dechets#', 'duration' => 60)))))));
+cache::delete('hygeabe::done::21');
+cmd::$sent = array();
+$tv->checkReminders(at($collecte2->modify('-1 day'), '18:02'));
+$recu = cmd::$sent;
+sent();
+check('rappel TV : la commande est jouée', count($recu), 1);
+check('rappel TV : #dechets# remplacé dans l\'objet', $recu[0]['options']['message']['message'], 'Sortir : Déchets organiques');
+check('rappel TV : la durée reste 60', $recu[0]['options']['message']['duration'], 60);
+
 echo "\n" . $passed . ' essai(s) réussi(s), ' . $failed . " en échec.\n";
 exit($failed === 0 ? 0 : 1);

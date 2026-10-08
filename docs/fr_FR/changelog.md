@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.1 — 08/10/2026
+
+- Les jetons (`#dechets#`, `#jour#`…) sont aussi remplacés dans un message
+  enregistré comme objet JSON, par exemple celui de « Notifier (JSON) » du
+  plugin Jeedom TV : la TV affichait jusqu'ici `#dechets#` tel quel.
+- Dans un message qui est du JSON, la valeur d'un jeton est échappée : un nom
+  de déchet contenant un guillemet ne casse plus le message.
+
 ## 0.7 — 29/09/2026
 
 **« C’est fait »**

@@ -1228,13 +1228,8 @@ class hygeabe extends eqLogic {
              * « Encombrants (sur rendez-vous) » n'a rien à faire dans un
              * évaluateur.
              */
-            $scenario = null;
             foreach ($options as $key => $value) {
-                if (!is_string($value)) {
-                    continue;
-                }
-                $value = scenarioExpression::setTags($value, $scenario);
-                $options[$key] = str_replace(array_keys($tags), array_values($tags), $value);
+                $options[$key] = self::applyTags($value, $tags);
             }
             try {
                 $this->runReminderAction($action['cmd'], $options);
@@ -1306,6 +1301,39 @@ class hygeabe extends eqLogic {
          * ont déjà eu lieu — dans le bon ordre. */
         unset($_options['enable'], $_options['background']);
         $cmd->execCmd($_options);
+    }
+
+    /*
+     * Remplace les jetons dans une option d'action : une chaîne, ou un tableau
+     * à toute profondeur. Un tableau, c'est par exemple le message de
+     * « Notifier (JSON) » de Jeedom TV enregistré comme objet : sans cela, la
+     * TV afficherait « #dechets# » tel quel. Les clés ne sont pas touchées, ni
+     * les valeurs qui ne sont pas du texte (une durée reste un entier).
+     *
+     * Dans une chaîne qui est elle-même un objet JSON, la valeur d'un jeton
+     * est échappée comme le fait le coeur (cmd::cmdToValue) : un nom de déchet
+     * contenant un guillemet ne casse pas le message.
+     */
+    public static function applyTags($_value, $_tags) {
+        if (is_array($_value)) {
+            foreach ($_value as $key => $item) {
+                $_value[$key] = self::applyTags($item, $_tags);
+            }
+            return $_value;
+        }
+        if (!is_string($_value)) {
+            return $_value;
+        }
+        $scenario = null;
+        $value = scenarioExpression::setTags($_value, $scenario);
+        if (is_json($value)) {
+            /* substr et non trim : trim mangerait aussi un guillemet échappé
+             * en fin de valeur (« Verre "blanc" ») et casserait le JSON. */
+            $_tags = array_map(function ($_text) {
+                return substr(json_encode((string) $_text, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 1, -1);
+            }, $_tags);
+        }
+        return str_replace(array_keys($_tags), array_values($_tags), $value);
     }
 
     /* Ce que l'utilisateur peut écrire dans le titre ou le message d'une action. */
