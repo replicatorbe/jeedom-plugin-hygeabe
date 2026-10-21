@@ -167,6 +167,11 @@ check('preSave remet en forme les actions de confirmation', $form->getConfigurat
 $form = new hygeabe();
 $form->preSave();
 check('preSave sans actions de confirmation : liste vide', $form->getConfiguration('done_actions'), array());
+check('preSave pose le délai max entre 2 communications', $form->getTimeout(), hygeabe::TIMEOUT_MINUTES);
+$form = new hygeabe();
+$form->timeout = 600;
+$form->preSave();
+check('preSave garde le délai choisi par l\'utilisateur', $form->getTimeout(), 600);
 
 /* ================================================================ LA VEILLE */
 section('La veille au soir');

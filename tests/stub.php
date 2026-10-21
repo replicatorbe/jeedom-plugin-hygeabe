@@ -115,6 +115,9 @@ class eqLogic {
         return isset($this->display[$_key]) ? $this->display[$_key] : $_default;
     }
     public function setDisplay($_key, $_value) { $this->display[$_key] = $_value; }
+    public $timeout = null;
+    public function getTimeout($_default = null) { return $this->timeout === null ? $_default : $this->timeout; }
+    public function setTimeout($_timeout) { $this->timeout = $_timeout; }
     public function getCmd($_type = null, $_logicalId = null) {
         return ($_logicalId === null) ? array() : null;
     }

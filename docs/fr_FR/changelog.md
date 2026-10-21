@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.2 — 21/10/2026
+
+- Une ligne par adresse dans la page **Santé** de Jeedom : l'âge du
+  calendrier en cache et le problème en cours, s'il y en a un.
+- **Délai max entre 2 communications** réglé à 3 heures à la création, et sur
+  les adresses existantes au prochain enregistrement : Jeedom signale
+  l'équipement si le cron horaire cesse de le mettre à jour. Une valeur déjà
+  choisie n'est pas touchée.
+
 ## 0.7.1 — 08/10/2026
 
 - Les jetons (`#dechets#`, `#jour#`…) sont aussi remplacés dans un message

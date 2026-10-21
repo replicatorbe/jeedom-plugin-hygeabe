@@ -51,6 +51,16 @@ class hygeabe extends eqLogic {
      * va le plus mal qu'il ne faut pas le marteler d'heure en heure. */
     const RETRY_DELAY = 10800;
 
+    /* « Délai max entre 2 communications » posé à la création, en minutes. Le
+     * cron horaire réécrit les commandes à chaque passage, même depuis le
+     * calendrier en cache : trois heures sans rien, c'est le cron qui ne
+     * tourne plus, ou une adresse qu'on n'a jamais réussi à lire. */
+    const TIMEOUT_MINUTES = 180;
+
+    /* Âge au-delà duquel la page Santé déclare un calendrier périmé : deux
+     * lectures quotidiennes manquées, retentatives comprises. */
+    const HEALTH_STALE = 172800;
+
     /* Valeur d'une commande « jours restants » quand la date est inconnue. Une
      * chaîne vide serait convertie en 0 par le coeur, c'est-à-dire « collecte
      * aujourd'hui ». */
@@ -178,9 +188,69 @@ class hygeabe extends eqLogic {
         }
     }
 
+    /* ================================================================== SANTÉ */
+
+    /*
+     * Une ligne par adresse active dans la page Santé de Jeedom : l'âge du
+     * calendrier en cache et le problème en cours au centre de messages. Rien
+     * n'est demandé au service ici, et rien n'est écrit.
+     */
+    public static function health() {
+        $return = array();
+        foreach (self::byType(__CLASS__, true) as $eqLogic) {
+            $name = htmlspecialchars($eqLogic->getHumanName(), ENT_QUOTES);
+            if (!$eqLogic->isConfigured()) {
+                $return[] = array(
+                    'test'   => $name,
+                    'result' => __('Adresse incomplète', __FILE__),
+                    'advice' => __('Renseignez la localité, la rue et le numéro.', __FILE__),
+                    'state'  => false,
+                );
+                continue;
+            }
+            $calendar = $eqLogic->getCalendar();
+            $age = isset($calendar['fetchedAt']) ? time() - (int) $calendar['fetchedAt'] : null;
+            $problem = $eqLogic->currentProblem();
+            $fresh = ($age !== null && $age <= self::HEALTH_STALE);
+            $result = ($age === null)
+                ? __('Calendrier jamais lu', __FILE__)
+                : sprintf(__('Calendrier lu il y a %s (une lecture par jour)', __FILE__), self::healthAge($age));
+            if ($problem !== '') {
+                // Déjà passé par secureXSS() à l'enregistrement du message.
+                $result .= ' — ' . $problem;
+            }
+            $return[] = array(
+                'test'   => $name,
+                'result' => $result,
+                'advice' => ($fresh && $problem === '') ? '' : __('Le service Recycle! ne répond pas pour cette adresse : voir le centre de messages et le log du plugin. Le calendrier connu reste affiché.', __FILE__),
+                'state'  => $fresh && $problem === '',
+            );
+        }
+        return $return;
+    }
+
+    /* « 3 h », « 2 j » : l'ordre de grandeur suffit à la page Santé. */
+    private static function healthAge($_seconds) {
+        if ($_seconds < 3600) {
+            return max(1, (int) round($_seconds / 60)) . ' min';
+        }
+        if ($_seconds < 172800) {
+            return (int) floor($_seconds / 3600) . ' h';
+        }
+        return (int) floor($_seconds / 86400) . ' j';
+    }
+
     /* ===================================================== CYCLE DE VIE eqLogic */
 
     public function preSave() {
+        /*
+         * Le coeur marque l'équipement en défaut au-delà de ce délai sans
+         * communication. Posé une seule fois : si l'utilisateur l'ajuste
+         * ensuite, c'est son choix.
+         */
+        if ((int) $this->getTimeout() === 0) {
+            $this->setTimeout(self::TIMEOUT_MINUTES);
+        }
         if ($this->getConfiguration('rollover_hour', '') === '') {
             $this->setConfiguration('rollover_hour', 0);
         }
@@ -1708,6 +1778,18 @@ class hygeabe extends eqLogic {
 
     private function clearProblem() {
         message::removeAll(__CLASS__, 'address' . $this->getId());
+    }
+
+    /* Le problème affiché au centre de messages pour cette adresse, sans le nom
+     * de l'équipement qui le précède ; chaîne vide s'il n'y en a pas. */
+    public function currentProblem() {
+        $existing = message::byPluginLogicalId(__CLASS__, 'address' . $this->getId());
+        foreach (is_array($existing) ? $existing : array() as $message) {
+            $text = (string) $message->getMessage();
+            $prefix = secureXSS($this->getHumanName() . ' ');
+            return (strpos($text, $prefix) === 0) ? substr($text, strlen($prefix)) : $text;
+        }
+        return '';
     }
 
     /* ==================================================================== OUTILS */
