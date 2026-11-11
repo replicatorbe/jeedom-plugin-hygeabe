@@ -51,6 +51,13 @@ class hygeabe extends eqLogic {
      * va le plus mal qu'il ne faut pas le marteler d'heure en heure. */
     const RETRY_DELAY = 10800;
 
+    /* Un service muet une fois n'est pas une panne : le 05/11/2026, une
+     * coupure de courant a laissé passer un « ne répond pas » isolé, suivi d'une
+     * lecture normale. Journalisé en « error » et publié au centre de messages,
+     * chacun alarmait pour rien. On avertit, et l'erreur — avec son message —
+     * ne tombe qu'au troisième échec réseau d'affilée. */
+    const NETWORK_ERROR_AFTER = 3;
+
     /* « Délai max entre 2 communications » posé à la création, en minutes. Le
      * cron horaire réécrit les commandes à chaque passage, même depuis le
      * calendrier en cache : trois heures sans rien, c'est le cron qui ne
@@ -166,7 +173,10 @@ class hygeabe extends eqLogic {
                 $eqLogic->update();
             } catch (Throwable $e) {
                 // Une adresse en échec ne doit pas priver les autres de leur mise à jour.
-                log::add(__CLASS__, 'error', $eqLogic->getHumanName() . ' : ' . $e->getMessage());
+                // Une lecture ratée est déjà signalée par update(), au bon niveau.
+                if ($eqLogic->getRefreshError() === '') {
+                    log::add(__CLASS__, 'error', $eqLogic->getHumanName() . ' : ' . $e->getMessage());
+                }
             }
         }
     }
@@ -309,7 +319,10 @@ class hygeabe extends eqLogic {
             } catch (Throwable $e) {
                 // L'enregistrement ne doit pas échouer parce que le service est
                 // indisponible : l'adresse est valide, le cron réessaiera.
-                log::add(__CLASS__, 'error', $this->getHumanName() . ' : ' . $e->getMessage());
+                // Une lecture ratée est déjà signalée par update(), au bon niveau.
+                if ($this->getRefreshError() === '') {
+                    log::add(__CLASS__, 'error', $this->getHumanName() . ' : ' . $e->getMessage());
+                }
             }
         }
         $this->settleReminders();
@@ -321,6 +334,7 @@ class hygeabe extends eqLogic {
          * doit donc être nettoyé tant que l'identifiant est encore lisible.
          */
         $this->clearCalendar();
+        cache::delete($this->failuresKey());
         // Sans cela, une adresse recréée hériterait de la mémoire des rappels de
         // l'ancienne — des clés que plus aucun écran ne permet de voir.
         $this->forgetReminders();
@@ -562,6 +576,11 @@ class hygeabe extends eqLogic {
         return 'hygeabe::retry::' . $this->getId();
     }
 
+    /* Nombre d'échecs réseau d'affilée, remis à zéro dès que le service répond. */
+    private function failuresKey() {
+        return 'hygeabe::failures::' . $this->getId();
+    }
+
     /* De quoi reconnaître que l'adresse a changé. */
     private function addressSignature() {
         return $this->getConfiguration('zipcode_id') . '|' . $this->getConfiguration('street_id')
@@ -617,9 +636,11 @@ class hygeabe extends eqLogic {
                      * suivante. Écraser un calendrier valide ferait disparaître la
                      * prochaine collecte du dashboard sans la moindre explication.
                      */
+                    $this->clearNetworkFailures();
                     $this->reportProblem(__('Le service ne publie plus de collecte pour cette adresse ; le calendrier précédent reste affiché.', __FILE__));
                     cache::set($this->retryKey(), time(), self::RETRY_DELAY);
                 } else {
+                    $this->clearNetworkFailures();
                     $calendar = $fresh;
                     cache::set($this->cacheKey(), json_encode($calendar), 0);
                     cache::delete($this->retryKey());
@@ -632,7 +653,13 @@ class hygeabe extends eqLogic {
                  * collecte du dashboard.
                  */
                 $this->_refreshError = $e->getMessage();
-                $this->reportProblem($e->getMessage());
+                if ($e instanceof hygeabeNetworkException) {
+                    $this->noteNetworkFailure($e->getMessage());
+                } else {
+                    // Le service a répondu, même pour refuser : le réseau va bien.
+                    $this->clearNetworkFailures();
+                    $this->reportProblem($e->getMessage());
+                }
                 cache::set($this->retryKey(), time(), self::RETRY_DELAY);
                 if (empty($calendar)) {
                     throw $e;
@@ -644,6 +671,34 @@ class hygeabe extends eqLogic {
         return $calendar;
     }
 
+
+    /* Avertissement pour un échec réseau isolé ; au troisième d'affilée, le
+     * problème est signalé pour de bon (erreur et centre de messages), et
+     * reportProblem() se charge de ne pas le répéter aux cycles suivants. */
+    private function noteNetworkFailure($_message) {
+        $count = (int) cache::byKey($this->failuresKey())->getValue(0) + 1;
+        cache::set($this->failuresKey(), $count, 0);
+        if ($count >= self::NETWORK_ERROR_AFTER) {
+            $this->reportProblem($_message);
+            return;
+        }
+        log::add(__CLASS__, 'warning', $this->getHumanName() . ' ' . $_message
+                 . ' (' . sprintf(__('échec réseau n° %d', __FILE__), $count) . ')');
+    }
+
+    /* Le service a répondu : le compteur repart de zéro. Le retour n'est
+     * annoncé que si l'erreur l'avait été. */
+    private function clearNetworkFailures() {
+        $count = (int) cache::byKey($this->failuresKey())->getValue(0);
+        if ($count === 0) {
+            return;
+        }
+        cache::delete($this->failuresKey());
+        if ($count >= self::NETWORK_ERROR_AFTER) {
+            log::add(__CLASS__, 'info', $this->getHumanName() . ' '
+                     . sprintf(__('service rétabli après %d échecs réseau.', __FILE__), $count));
+        }
+    }
 
     /* Ce qui a empêché la dernière lecture, ou une chaîne vide si tout s'est
      * bien passé. Le contrôleur ajax s'en sert pour ne pas annoncer un succès
@@ -1763,7 +1818,14 @@ class hygeabe extends eqLogic {
                 return;
             }
         }
-        log::add(__CLASS__, 'error', $text);
+        /*
+         * Avertissement, et non erreur : avec l'option du coeur « Ajouter un
+         * message à chaque erreur dans les logs », log::add() en 'error' pose
+         * lui-même un second message, à identifiant aléatoire, que
+         * clearProblem() ne retrouverait jamais. Le message, c'est le plugin
+         * qui le pose juste en dessous, et qui sait le retirer.
+         */
+        log::add(__CLASS__, 'warning', $text);
         /*
          * message::save() ne met à jour que la date et le compteur d'un message
          * existant, jamais son texte : sans cet effacement préalable, la
@@ -1899,7 +1961,7 @@ class hygeabe extends eqLogic {
 
         if ($base == '') {
             $base = self::API_HOST;
-            $settings = self::httpGet(self::API_SETTINGS, 5);
+            $settings = static::httpGet(self::API_SETTINGS, 5);
             $decoded = ($settings === false) ? null : json_decode($settings, true);
 
             if (isset($decoded['API']) && strpos($decoded['API'], 'https://') === 0) {
@@ -1931,7 +1993,7 @@ class hygeabe extends eqLogic {
         }
 
         $code = 0;
-        $body = self::httpGet($url, (int) config::byKey('api_timeout', __CLASS__, 10), $code);
+        $body = static::httpGet($url, (int) config::byKey('api_timeout', __CLASS__, 10), $code);
 
         /*
          * Seules l'absence de réponse et une panne serveur peuvent signer un
@@ -1945,7 +2007,7 @@ class hygeabe extends eqLogic {
                 self::apiBase(true);
                 return self::call($_path, $_params, false);
             }
-            throw new Exception(__('Le service de collecte ne répond pas', __FILE__)
+            throw new hygeabeNetworkException(__('Le service de collecte ne répond pas', __FILE__)
                 . ' (' . (($code == 0) ? __('aucune réponse', __FILE__) : 'HTTP ' . $code) . ').');
         }
 
@@ -2009,8 +2071,10 @@ class hygeabe extends eqLogic {
         return $items;
     }
 
-    /* Requête HTTP brute. Renvoie le corps, ou false si rien n'est arrivé. */
-    private static function httpGet($_url, $_timeout = 10, &$_code = null) {
+    /* Requête HTTP brute. Renvoie le corps, ou false si rien n'est arrivé.
+     * Protégée et appelée par static:: : le jeu d'essai la remplace pour
+     * rejouer une panne sans réseau. */
+    protected static function httpGet($_url, $_timeout = 10, &$_code = null) {
         $curl = curl_init();
         curl_setopt_array($curl, array(
             CURLOPT_URL            => $_url,
@@ -2156,6 +2220,11 @@ class hygeabe extends eqLogic {
     }
 }
 
+
+/* Le service ne répond pas (rien reçu, ou panne serveur) : le seul échec qui
+ * passe par le compteur d'échecs réseau. */
+class hygeabeNetworkException extends Exception {
+}
 
 class hygeabeCmd extends cmd {
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.3 — 11/11/2026
+
+- Un service de collecte muet une fois (délai dépassé, DNS, panne serveur)
+  n'est plus journalisé en erreur ni publié au centre de messages : c'est un
+  avertissement. L'erreur et le message ne tombent qu'au troisième échec réseau
+  d'affilée ; le retour à la normale est alors signalé dans le journal. Une
+  adresse refusée par le service reste signalée tout de suite.
+- Une lecture en échec sans calendrier connu n'est plus journalisée deux fois.
+- Un problème signalé ne laisse plus de second message au centre de messages
+  quand l'option du coeur « message à chaque erreur dans les logs » est active :
+  il est journalisé en avertissement, le message du plugin suffit et disparaît
+  au retour du service.
+
 ## 0.7.2 — 21/10/2026
 
 - Une ligne par adresse dans la page **Santé** de Jeedom : l'âge du

@@ -62,7 +62,17 @@ class message {
         unset(self::$messages[$_logicalId]);
     }
     public static function byPlugin($_plugin) { return array(); }
-    public static function byPluginLogicalId($_plugin, $_logicalId) { return array(); }
+    /* Comme le coeur : le message déjà affiché sous cet identifiant, ce qui
+     * permet à reportProblem() de ne pas répéter une erreur déjà signalée. */
+    public static function byPluginLogicalId($_plugin, $_logicalId) {
+        return isset(self::$messages[$_logicalId]) ? array(new storedMessage(self::$messages[$_logicalId])) : array();
+    }
+}
+
+class storedMessage {
+    private $text;
+    public function __construct($_text) { $this->text = $_text; }
+    public function getMessage() { return $this->text; }
 }
 
 /* Les blocs du coeur (message, scénario...) : on note qu'ils ont été joués. */

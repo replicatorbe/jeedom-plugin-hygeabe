@@ -8,6 +8,8 @@
         "Nouvelle lecture de l'adresse du service après un échec sur :": "Reading the service address again after a failure on:",
         "Le service de collecte ne répond pas": "The collection service is not answering",
         "aucune réponse": "no answer",
+        "échec réseau n° %d": "network failure #%d",
+        "service rétabli après %d échecs réseau.": "service back after %d network failures.",
         "Le service a refusé la demande : vérifiez la localité, la rue et le numéro.": "The service rejected the request: check the locality, the street and the house number.",
         "Adresse inconnue du service : cette rue n'appartient pas à cette localité.": "Address unknown to the service: this street does not belong to this locality.",
         "Réponse inattendue du service de collecte :": "Unexpected answer from the collection service:",

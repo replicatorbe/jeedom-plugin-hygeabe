@@ -357,5 +357,98 @@ check('rappel TV : la commande est jouée', count($recu), 1);
 check('rappel TV : #dechets# remplacé dans l\'objet', $recu[0]['options']['message']['message'], 'Sortir : Déchets organiques');
 check('rappel TV : la durée reste 60', $recu[0]['options']['message']['duration'], 60);
 
+/* =================================================== SERVICE INJOIGNABLE */
+section('Service injoignable : avertir d\'un échec isolé, message au troisième d\'affilée');
+
+/* Le service rejoué sans réseau : httpGet() renvoie ce qu'on lui dit. */
+class hygeabeOffline extends hygeabe {
+    public static $body = false;
+    public static $code = 0;
+    protected static function httpGet($_url, $_timeout = 10, &$_code = null) {
+        $_code = self::$code;
+        return self::$body;
+    }
+}
+
+$off = new hygeabeOffline();
+$off->configuration = array('zipcode_id' => '4000-24', 'street_id' => 'rue', 'house_number' => '1',
+                            'rollover_hour' => 0, 'per_fraction' => 0, 'reminders' => array(), 'done_actions' => array());
+$perime = $calendar;
+$perime['fetchedAt'] = time() - 2 * 86400;
+cache::set('hygeabe::calendar::21', json_encode($perime));
+cache::delete('hygeabe::failures::21');
+message::$messages = array();
+
+/* Un cycle horaire où le calendrier est à relire : la clé d'attente posée par
+ * l'échec précédent est levée, comme si les trois heures étaient passées. */
+function cycleEnPanne($_eq) {
+    cache::delete('hygeabe::retry::21');
+    $from = count(log::$lines);
+    $_eq->update();
+    return array_slice(log::$lines, $from);
+}
+function niveaux($_lines) {
+    return array_values(array_unique(array_map(function ($_l) { return strstr($_l, ' : ', true); }, $_lines)));
+}
+
+hygeabeOffline::$body = false;
+hygeabeOffline::$code = 0;
+$l = cycleEnPanne($off);
+check('1er échec : un avertissement, pas d\'erreur', in_array('error', niveaux($l)), false);
+check('1er échec : avertissement numéroté', logged('échec réseau n° 1', count(log::$lines) - count($l)), true);
+check('1er échec : rien au centre de messages', count(message::$messages), 0);
+check('1er échec : l\'erreur de lecture reste connue de l\'ajax', $off->getRefreshError() !== '', true);
+$l = cycleEnPanne($off);
+check('2e échec : toujours un avertissement', in_array('error', niveaux($l)), false);
+$l = cycleEnPanne($off);
+check('3e échec : message du plugin au centre de messages', array_keys(message::$messages), array('address21'));
+/* Une ligne « error » ferait poser au coeur (addMessageForErrorLog) un second
+ * message, à identifiant aléatoire, que le plugin ne pourrait jamais retirer. */
+check('3e échec : journalisé sans « error »', in_array('error', niveaux($l)), false);
+check('3e échec : signalé au journal', in_array('warning', niveaux($l)), true);
+$l = cycleEnPanne($off);
+check('4e échec : signalé une fois, debug ensuite', niveaux($l), array('debug'));
+
+/* Le service répond de nouveau (calendrier vide : le précédent reste). */
+hygeabeOffline::$body = '{"items":[],"pages":1}';
+hygeabeOffline::$code = 200;
+$from = count(log::$lines);
+cycleEnPanne($off);
+check('retour : annoncé une fois', logged('rétabli après 4 échecs', $from), true);
+check('retour : compteur remis à zéro', cache::byKey('hygeabe::failures::21')->getValue(0), 0);
+
+/* Deux échecs isolés séparés par un succès ne font pas une panne. */
+hygeabeOffline::$body = false;
+hygeabeOffline::$code = 0;
+message::$messages = array();
+cycleEnPanne($off);
+cycleEnPanne($off);
+hygeabeOffline::$body = '{"items":[],"pages":1}';
+hygeabeOffline::$code = 200;
+cycleEnPanne($off);
+hygeabeOffline::$body = false;
+hygeabeOffline::$code = 0;
+$l = cycleEnPanne($off);
+check('échec après un succès : repart à n° 1, sans erreur', in_array('error', niveaux($l)), false);
+
+/* Une panne serveur compte comme un service muet. */
+hygeabeOffline::$body = 'oops';
+hygeabeOffline::$code = 503;
+cycleEnPanne($off);
+$l = cycleEnPanne($off);
+check('HTTP 503 : compté comme échec réseau (3e : message)', array_keys(message::$messages), array('address21'));
+
+/* Une adresse refusée n'est pas une panne réseau : signalée tout de suite. */
+cache::delete('hygeabe::failures::21');
+message::$messages = array();
+hygeabeOffline::$body = '{"message":"Invalid query"}';
+hygeabeOffline::$code = 400;
+cache::set('hygeabe::failures::21', 2);
+$l = cycleEnPanne($off);
+check('HTTP 400 : signalé tout de suite au centre de messages', array_keys(message::$messages), array('address21'));
+check('HTTP 400 : toujours sans « error » au journal', in_array('error', niveaux($l)), false);
+check('HTTP 400 : le service a répondu, compteur remis à zéro', cache::byKey('hygeabe::failures::21')->getValue(0), 0);
+cache::set('hygeabe::calendar::21', json_encode($calendar));
+
 echo "\n" . $passed . ' essai(s) réussi(s), ' . $failed . " en échec.\n";
 exit($failed === 0 ? 0 : 1);

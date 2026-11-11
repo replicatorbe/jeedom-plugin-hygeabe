@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.3 — 11/11/2026
+
+- A collection service that fails to answer once (timeout, DNS, server error)
+  is no longer logged as an error nor posted to the message centre: it is a
+  warning. The error and the message only come on the third network failure in
+  a row; the return to normal is then reported in the log. An address rejected
+  by the service is still reported straight away.
+- A failed read with no known calendar is no longer logged twice.
+- A reported problem no longer leaves a second entry in the message centre when
+  the core option “add a message for each error in the logs” is on: it is
+  logged as a warning, the plugin's own message is enough and goes away when
+  the service is back.
+
 ## 0.7 — 29/09/2026
 
 **"Done"**
